@@ -1,0 +1,137 @@
+doc: |
+  Cold-start LLM weight-loading benchmark
+  =======================================
+
+  Compares wall-clock time from process start to weights readable in
+  memory, for two paths against the same file:
+
+    1. Baseline. llama.cpp default weight loader (mmap + cudaMemcpyAsync).
+    2. xNVMe (v1). Read the file via xNVMe's io_uring file backend into
+       a DMA-capable host buffer, submitting async preads sized to the
+       device's ``mdts_nbytes`` up to a configured queue depth. This
+       first cut goes through the kernel filesystem stack; a follow-up
+       variant will read raw block extents via xal to drop the kernel
+       out of the data path.
+
+  Prerequisites on the target host:
+
+    - CUDA toolchain and drivers matching the GPU (RTX A6000 = sm_86).
+    - xnvme >= 0.7.0 installed system-wide (discoverable via pkg-config).
+    - meson, cmake, gcc, xfsprogs.
+    - A spare NVMe device or partition dedicated to the model. It will
+      be formatted XFS if ``force_format`` is set.
+    - The .gguf file staged at ``gguf_src`` on the target host (rsync or
+      scp before running this task).
+
+  Adjust the ``with:`` values below to match your target's device names,
+  mount points, and model file location.
+
+steps:
+- name: sync
+  uses: git_sync
+  with:
+    # 'upstream' is only used the first time git_sync runs, to bootstrap the
+    # target's checkout. Point it at the real upstream so the initial clone
+    # pulls llama.cpp base history over HTTPS; every subsequent update pushes
+    # this branch direct from local to target over the ssh:// transport built
+    # from cijoe.transport.ssh, no GitHub round-trip.
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: install_xnvme
+  uses: install_xnvme
+  with:
+    xnvme_src: /root/xnvme
+    xnvme_branch: main
+
+- name: build
+  uses: remote_build
+  with:
+    llama_src: /root/llama.cpp
+    llama_build: /root/llama.cpp/build
+    cuda_arch: "86"
+
+- name: fetch_model
+  uses: fetch_model
+  with:
+    # Qwen 2.5 32B Instruct Q8_0 is public (no HF token), single-file
+    # ~34.8 GB, and comfortably fits in the RTX A6000's 48 GB VRAM.
+    # Big enough that mmap's memory-efficiency story vs our own
+    # full-file host DMA buffer becomes visible in max_rss.
+    gguf_src: /root/models/Qwen2.5-32B-Instruct-Q8_0.gguf
+    gguf_url: https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF/resolve/main/Qwen2.5-32B-Instruct-Q8_0.gguf?download=true
+
+- name: setup_dataset
+  uses: setup_dataset
+  with:
+    pci_addr: "0000:01:00.0"
+    namespace: 1
+    mount_point: /mnt/gguf
+    gguf_src: /root/models/Qwen2.5-32B-Instruct-Q8_0.gguf
+    gguf_dst_name: model.gguf
+    force_format: true
+
+- name: run_baseline
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    no_mmap: false
+
+- name: run_baseline_no_mmap
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    no_mmap: true
+
+- name: run_io_uring_load
+  uses: run_io_uring_load
+  with:
+    io_uring_load_bin: /usr/local/bin/io-uring-load
+    file_path: /mnt/gguf/model.gguf
+    qd: 64
+    io_sizes: "131072"
+    iterations: 1
+
+- name: run_xnvme_load
+  uses: run_xnvme_load
+  with:
+    xnvme_load_bin: /usr/local/bin/xnvme-load
+    file_path: /mnt/gguf/model.gguf
+    async_be: io_uring
+    qd: 64
+    io_sizes: "131072"
+    iterations: 1
+
+- name: run_xal_load
+  uses: run_xal_load
+  with:
+    xal_load_bin: /usr/local/bin/xal-load
+    pci_addr: "0000:01:00.0"
+    namespace: 1
+    file_path: /mnt/gguf/model.gguf
+    qd: 64
+    io_sizes: "131072"
+    iterations: 1
+
+- name: run_iou_ring_load
+  uses: run_iou_ring_load
+  with:
+    iou_ring_load_bin: /usr/local/bin/iou-ring-load
+    file_path: /mnt/gguf/model.gguf
+    qd: 64
+    io_sizes: "131072"
+    iterations: 1
