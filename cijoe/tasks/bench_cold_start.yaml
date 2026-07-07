@@ -68,7 +68,11 @@ steps:
 - name: setup_dataset
   uses: setup_dataset
   with:
-    pci_addr: "0000:01:00.0"
+    # Source drive: kernel-managed, XFS-mounted at /mnt/gguf. Holds the
+    # model file for llama.cpp's file-open + metadata reads. Any spare
+    # NVMe works here since bulk reads go through the DMA target below
+    # for the upcie-cuda variants.
+    pci_addr: "0000:c1:00.0"
     namespace: 1
     mount_point: /mnt/gguf
     gguf_src: /root/models/Qwen2.5-32B-Instruct-Q8_0.gguf
@@ -137,6 +141,7 @@ steps:
     xnvme_be: io_uring_file
     xnvme_cpu: "0"
 
+
 - name: run_io_uring_load
   uses: run_io_uring_load
   with:
@@ -160,7 +165,10 @@ steps:
   uses: run_xal_load
   with:
     xal_load_bin: /usr/local/bin/xal-load
-    pci_addr: "0000:01:00.0"
+    # Read the mounted file's /dev/ngXnY on the source drive; the DMA target
+    # is bound to vfio-pci by setup_dma_target below and cannot be read via
+    # the kernel's /dev/ng interface.
+    pci_addr: "0000:c1:00.0"
     namespace: 1
     file_path: /mnt/gguf/model.gguf
     qd: 64
@@ -175,3 +183,40 @@ steps:
     qd: 64
     io_sizes: "131072"
     iterations: 1
+
+# ---------------------------------------------------------------------
+# Everything below this line detaches the DMA target from the kernel and
+# binds it to vfio-pci. After setup_dma_target runs, the kernel-driver
+# steps above are no longer runnable in this workflow instance.
+# ---------------------------------------------------------------------
+
+- name: setup_dma_target
+  uses: setup_dma_target
+  with:
+    # DMA target: kernel driver detached, bound to vfio-pci, raw-dd'd with
+    # the .gguf so xNVMe's upcie-cuda backend can DMA directly into VRAM.
+    # 0000:01:00.0 = the Samsung 9100 PRO on warp (fastest drive).
+    dma_pci_addr: "0000:01:00.0"
+    dma_namespace: 1
+    source_gguf: /mnt/gguf/model.gguf
+    gguf_extents_path: /root/model.extents.json
+
+- name: run_llama_xnvme_upcie
+  uses: run_baseline
+  with:
+    # P2P NVMe -> VRAM: xNVMe opens the DMA drive via upcie (userspace
+    # NVMe driver), xnvme_buf_alloc returns cudaMalloc'd slots so the
+    # NVMe controller DMAs straight into VRAM, D2D memcpy from slot to
+    # the tensor buffer runs at HBM speed. gguf_path is the file on the
+    # mounted source drive (llama.cpp opens it for metadata); the bulk
+    # weights come from the DMA drive at LBA 0.
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uri: "0000:01:00.0"

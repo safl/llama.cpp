@@ -1,0 +1,241 @@
+doc: |
+  Multi-instance cold-start benchmark on the same four-drive layout.
+
+  Four llama.cpp processes launched concurrently, one per NVMe drive.
+  Same four models on the same four drives serve every loader path;
+  the drives spend the baseline runs kernel-attached (XFS-mounted at
+  /mnt/dma-0..3) and the upcie-cuda run detached (bound to
+  uio_pci_generic, opened via the FIEMAP extents JSON captured before
+  detach).
+
+  Storage layout:
+    - Source drive: 9100 PRO at 0000:01:00.0, XFS at /mnt/gguf-src.
+      Holds all four model files. Used for the upcie-cuda run's
+      llama.cpp file-open + GGUF metadata reads (small); every bulk
+      byte at that stage comes from the DMA fleet.
+    - DMA fleet: four 990 PROs at 0000:c1..c4:00.0. Each formatted
+      XFS, mounted at /mnt/dma-i, one model file copied on. Baselines
+      read straight from /mnt/dma-i (kernel path). Then FIEMAP is
+      captured, drives are umounted and bound to uio_pci_generic, and
+      the upcie-cuda run reads the same file layout via P2P.
+
+  Comparison targets (all four instances launched concurrently):
+    1. --loader mmap on /mnt/dma-i             (kernel demand-page)
+    2. --loader stream on /mnt/dma-i           (kernel pread ring)
+    3. --loader xnvme -dio --xnvme-be io_uring_file on /mnt/dma-i
+                                               (kernel io_uring)
+    4. --loader xnvme --xnvme-be upcie-cuda    (userspace P2P)
+
+  Steps 1-3 share the same four kernel-attached drives; step 4 uses
+  the same drives after detach. Storage layout is byte-identical
+  across all four measurements.
+
+steps:
+# Self-heal from any previous upcie run that left drives bound to
+# uio_pci_generic. `xnvme-driver reset` is a no-op if everything is
+# already on the kernel nvme driver.
+- name: driver_reset
+  uses: xnvme_driver_reset
+
+- name: sync
+  uses: git_sync
+  with:
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: install_xnvme
+  uses: install_xnvme
+  with:
+    xnvme_src: /root/xnvme
+    xnvme_branch: main
+
+- name: build
+  uses: remote_build
+  with:
+    llama_src: /root/llama.cpp
+    llama_build: /root/llama.cpp/build
+    cuda_arch: "86"
+
+# Source drive: mount /mnt/gguf-src on the 9100 PRO so all four
+# fetch_model steps drop their downloads directly on it.
+- name: mount_source_drive
+  uses: setup_dataset
+  with:
+    pci_addr: "0000:01:00.0"
+    namespace: 1
+    mount_point: /mnt/gguf-src
+    gguf_src: ""
+    force_format: true
+
+- name: fetch_llama
+  uses: fetch_model
+  with:
+    gguf_src: /mnt/gguf-src/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf
+    gguf_url: https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf?download=true
+
+- name: fetch_qwen
+  uses: fetch_model
+  with:
+    gguf_src: /mnt/gguf-src/Qwen2.5-7B-Instruct-Q8_0.gguf
+    gguf_url: https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q8_0.gguf?download=true
+
+- name: fetch_mistral
+  uses: fetch_model
+  with:
+    gguf_src: /mnt/gguf-src/Mistral-7B-Instruct-v0.3-Q8_0.gguf
+    gguf_url: https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q8_0.gguf?download=true
+
+- name: fetch_gemma
+  uses: fetch_model
+  with:
+    gguf_src: /mnt/gguf-src/gemma-2-9b-it-Q8_0.gguf
+    gguf_url: https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q8_0.gguf?download=true
+
+# For each 990 PRO: format XFS, copy assigned model, capture FIEMAP.
+# defer_detach leaves the drive mounted at /mnt/dma-i so baseline
+# loaders can read via the kernel path against the same layout.
+- name: prepare_dma_llama
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-0
+    fs_dst_name: model.gguf
+    source_gguf: /mnt/gguf-src/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf
+    gguf_extents_path: /root/dma-c1.extents.json
+
+- name: prepare_dma_qwen
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-1
+    fs_dst_name: model.gguf
+    source_gguf: /mnt/gguf-src/Qwen2.5-7B-Instruct-Q8_0.gguf
+    gguf_extents_path: /root/dma-c2.extents.json
+
+- name: prepare_dma_mistral
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-2
+    fs_dst_name: model.gguf
+    source_gguf: /mnt/gguf-src/Mistral-7B-Instruct-v0.3-Q8_0.gguf
+    gguf_extents_path: /root/dma-c3.extents.json
+
+- name: prepare_dma_gemma
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-3
+    fs_dst_name: model.gguf
+    source_gguf: /mnt/gguf-src/gemma-2-9b-it-Q8_0.gguf
+    gguf_extents_path: /root/dma-c4.extents.json
+
+# ---------------------------------------------------------------------
+# Kernel-path baselines: all four 990 PROs are still XFS-mounted at
+# /mnt/dma-i. Each run launches four llama.cpp instances concurrently,
+# one per drive, one per model.
+# ---------------------------------------------------------------------
+
+- name: run_parallel_mmap
+  uses: run_parallel_instances
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    loader: mmap
+    model_paths: "/mnt/dma-0/model.gguf,/mnt/dma-1/model.gguf,/mnt/dma-2/model.gguf,/mnt/dma-3/model.gguf"
+    log_dir: /tmp/multi-instance-mmap
+
+- name: run_parallel_stream
+  uses: run_parallel_instances
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    loader: stream
+    model_paths: "/mnt/dma-0/model.gguf,/mnt/dma-1/model.gguf,/mnt/dma-2/model.gguf,/mnt/dma-3/model.gguf"
+    log_dir: /tmp/multi-instance-stream
+
+- name: run_parallel_xnvme_file
+  uses: run_parallel_instances
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    loader: xnvme
+    xnvme_be: io_uring_file
+    direct_io: "true"
+    cpus: "0,1,2,3"
+    model_paths: "/mnt/dma-0/model.gguf,/mnt/dma-1/model.gguf,/mnt/dma-2/model.gguf,/mnt/dma-3/model.gguf"
+    log_dir: /tmp/multi-instance-xnvme-file
+
+# ---------------------------------------------------------------------
+# Transition each drive from kernel-attached to uio_pci_generic. After
+# this block the /mnt/dma-i mounts are gone and the drives are open to
+# upcie-cuda only.
+# ---------------------------------------------------------------------
+
+- name: detach_dma_llama
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    fs_mount_point: /mnt/dma-0
+
+- name: detach_dma_qwen
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    fs_mount_point: /mnt/dma-1
+
+- name: detach_dma_mistral
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    fs_mount_point: /mnt/dma-2
+
+- name: detach_dma_gemma
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    fs_mount_point: /mnt/dma-3
+
+# ---------------------------------------------------------------------
+# Upcie-cuda P2P run. llama.cpp opens the model file on the 9100 PRO
+# (source drive) for GGUF header + tensor-table reads; every bulk
+# weight byte flows NVMe -> VRAM directly from the detached 990 PROs
+# via the FIEMAP extents captured before detach.
+# ---------------------------------------------------------------------
+
+- name: run_parallel_upcie
+  uses: run_parallel_instances
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    cpus: "0,1,2,3"
+    model_paths: "/mnt/gguf-src/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf,/mnt/gguf-src/Qwen2.5-7B-Instruct-Q8_0.gguf,/mnt/gguf-src/Mistral-7B-Instruct-v0.3-Q8_0.gguf,/mnt/gguf-src/gemma-2-9b-it-Q8_0.gguf"
+    dma_uris: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    dma_extents: "/root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json"
+    log_dir: /tmp/multi-instance-upcie

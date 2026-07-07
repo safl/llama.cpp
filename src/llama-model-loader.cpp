@@ -1547,7 +1547,7 @@ bool llama_model_loader::load_all_data(
     // hashing splits rows). Falls back to the STREAM tensor loop below on
     // any setup failure or when built without LLAMA_USE_XNVME.
     bool xnvme_ok = false;
-    if (loader_type == LLAMA_LOADER_XNVME && upload_backend && !check_tensors) {
+    if (loader_type == LLAMA_LOADER_XNVME && upload_backend && !check_tensors && !no_alloc) {
         std::vector<llama_loader_xnvme_job> jobs;
         jobs.reserve(64);
         for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {

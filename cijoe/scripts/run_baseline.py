@@ -39,6 +39,12 @@ def add_args(parser: ArgumentParser):
                         help="xNVMe backend name, e.g. io_uring_file")
     parser.add_argument("--xnvme_cpu", type=str, default="",
                         help="CPU index to pin the xNVMe loader thread to (via LLAMA_XNVME_CPU)")
+    parser.add_argument("--xnvme_dma_uri", type=str, default="",
+                        help="PCIe URI of a single DMA target NVMe (via LLAMA_XNVME_DMA_URI); required for --xnvme-be upcie-cuda")
+    parser.add_argument("--xnvme_dma_uris", type=str, default="",
+                        help="Comma-separated PCIe URIs (via LLAMA_XNVME_DMA_URIS); enables the multi-drive rotate loader")
+    parser.add_argument("--xnvme_dma_extents", type=str, default="",
+                        help="Path to extents JSON (via LLAMA_XNVME_DMA_EXTENTS); for --xnvme_dma_uris pass a comma-separated list, one per URI")
 
 
 def _truthy(v: str) -> bool:
@@ -56,7 +62,16 @@ def main(args, cijoe):
             log.error(f"iter {i}: drop_caches failed")
             return err
 
-        env_prefix = f"LLAMA_XNVME_CPU={args.xnvme_cpu} " if args.xnvme_cpu else ""
+        env_parts = []
+        if args.xnvme_cpu:
+            env_parts.append(f"LLAMA_XNVME_CPU={args.xnvme_cpu}")
+        if args.xnvme_dma_uris:
+            env_parts.append(f"LLAMA_XNVME_DMA_URIS={args.xnvme_dma_uris}")
+        elif args.xnvme_dma_uri:
+            env_parts.append(f"LLAMA_XNVME_DMA_URI={args.xnvme_dma_uri}")
+        if args.xnvme_dma_extents:
+            env_parts.append(f"LLAMA_XNVME_DMA_EXTENTS={args.xnvme_dma_extents}")
+        env_prefix = f"{' '.join(env_parts)} " if env_parts else ""
 
         cmd = (
             f"{env_prefix}"

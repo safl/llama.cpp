@@ -68,6 +68,21 @@ if (LLAMA_XNVME)
         target_link_libraries(llama PRIVATE PkgConfig::XNVME)
         target_compile_definitions(llama PRIVATE LLAMA_USE_XNVME)
         message(STATUS "llama: xNVMe loader enabled (version ${XNVME_VERSION})")
+
+        # upcie-cuda P2P path in llama-loader-xnvme.cpp calls cudaMemcpyAsync
+        # / cudaEvent / cudaStream, which needs the CUDA runtime. When
+        # GGML_CUDA is on the toolchain is already there; probe for it and
+        # link the runtime library only into the llama target.
+        if (GGML_CUDA)
+            find_package(CUDAToolkit)
+            if (CUDAToolkit_FOUND)
+                target_link_libraries(llama PRIVATE CUDA::cudart)
+                target_include_directories(llama PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+                message(STATUS "llama: xNVMe upcie-cuda P2P path enabled (CUDA runtime linked)")
+            else()
+                message(STATUS "llama: CUDAToolkit not found; --xnvme-be upcie-cuda will fall back")
+            endif()
+        endif()
     else()
         message(STATUS "llama: xNVMe not found via pkg-config; --loader xnvme will fall back to STREAM")
     endif()

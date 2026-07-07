@@ -23,7 +23,8 @@ def add_args(parser: ArgumentParser):
     parser.add_argument("--namespace", type=int, default=1,
                         help="NVMe namespace id (1 for typical single-ns SSDs)")
     parser.add_argument("--mount_point", type=str, required=True)
-    parser.add_argument("--gguf_src", type=str, required=True)
+    parser.add_argument("--gguf_src", type=str, default="",
+                        help="Model file to copy onto the mount; empty for mount-only")
     parser.add_argument("--gguf_dst_name", type=str, default="model.gguf")
     parser.add_argument("--force_format", type=str, default="false",
                         help="'true' to run mkfs.xfs -f on the resolved device")
@@ -67,6 +68,11 @@ def main(args, cijoe):
     err, _ = cijoe.run(f"mount {target_device} {args.mount_point}")
     if err:
         log.error(f"mount {target_device} at {args.mount_point} failed")
+        return err
+
+    if not args.gguf_src:
+        log.info(f"mount-only mode (empty gguf_src); {target_device} mounted at {args.mount_point}")
+        err, _ = cijoe.run(f"ls -la {args.mount_point}")
         return err
 
     dst = f"{args.mount_point}/{args.gguf_dst_name}"

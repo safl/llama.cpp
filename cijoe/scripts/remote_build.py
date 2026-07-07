@@ -30,12 +30,14 @@ def main(args, cijoe):
         log.error("cmake configure failed")
         return err
 
-    # Build llama-completion (one-shot, tty-free) instead of llama-cli
-    # (which was refactored into a chat-only REPL). run_baseline runs
-    # the resulting binary directly out of build/bin so we skip cmake
-    # --install.
+    # Build all three llama.cpp front-ends. llama-completion is what
+    # run_baseline / run_parallel_instances time (tty-free one-shot).
+    # llama-cli and llama-server are built alongside so an operator
+    # can poke at models interactively / over HTTP against the same
+    # libllama.so without hitting an ABI mismatch from a stale binary.
     err, _ = cijoe.run(
-        f"cmake --build {args.llama_build} {jobs} -t llama-completion"
+        f"cmake --build {args.llama_build} {jobs} "
+        f"--target llama-completion llama-cli llama-server"
     )
     if err:
         log.error("cmake build failed")
