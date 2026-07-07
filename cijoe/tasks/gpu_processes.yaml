@@ -1,0 +1,4 @@
+doc: Show GPU processes and current VRAM.
+steps:
+- name: probe
+  uses: gpu_processes

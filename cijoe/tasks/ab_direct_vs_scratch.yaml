@@ -1,0 +1,59 @@
+doc: |
+  A/B compare direct-into-tensor vs forced-scratch through the same
+  mem_map registration path. Assumes DMA fleet already detached
+  and extents JSONs on disk.
+
+steps:
+- name: kill_stray_cuda
+  uses: kill_stray_cuda
+
+- name: enable_mps
+  uses: enable_mps
+
+- name: sync
+  uses: git_sync
+  with:
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: build
+  uses: remote_build
+  with:
+    llama_src: /root/llama.cpp
+    llama_build: /root/llama.cpp/build
+    cuda_arch: "86"
+
+- name: run_direct_default
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-src/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uris: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    xnvme_dma_extents: "/root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json"
+
+- name: run_force_scratch
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-src/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uris: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    xnvme_dma_extents: "/root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json"
+    xnvme_force_scratch: "1"

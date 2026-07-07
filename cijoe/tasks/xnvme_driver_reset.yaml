@@ -1,0 +1,8 @@
+doc: |
+  Run `xnvme-driver reset` on the target. Re-binds any drives currently
+  held by uio_pci_generic (from a prior upcie run) back to the kernel
+  nvme driver so the next workflow can format XFS on them.
+
+steps:
+- name: reset
+  uses: xnvme_driver_reset

@@ -1,0 +1,8 @@
+doc: |
+  Make sure no llama-cli / llama-completion / llama-server is holding
+  VRAM before running a benchmark, and print current GPU memory to
+  confirm a clean slate.
+
+steps:
+- name: kill
+  uses: kill_stray_cuda

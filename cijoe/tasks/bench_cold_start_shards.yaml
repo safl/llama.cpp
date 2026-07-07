@@ -1,0 +1,226 @@
+doc: |
+  Sharded cold-start benchmark on a real 42 GB Q4_K_M 70B model.
+
+  Setup:
+    - Fetch Llama-3.3-70B-Instruct-Q4_K_M.gguf onto the source drive
+      (9100 PRO at /mnt/gguf-src).
+    - Split into 4 shards via llama-gguf-split.
+    - Stage shard-i onto DMA drive-i (990 PRO) as an XFS file, capture
+      FIEMAP, leave mounted for the kernel-path baselines.
+    - Create a symlink directory /mnt/gguf-shards/ that references
+      shard-i on drive-i so llama.cpp's split-shard autoload finds all
+      four side by side while reads span all four drives.
+    - Run mmap / stream / xnvme_file baselines against the symlink dir
+      (they'll see 4 drives via kernel FS but only load one drive at
+      a time because they sort jobs file-serial).
+    - Detach all four DMA drives to uio_pci_generic.
+    - Run upcie-cuda with per-shard drive routing (file_idx == URI index).
+
+  All four loader paths see the same physical shard files on the same
+  four drives. The only difference is whether the loader actually keeps
+  more than one drive busy at a time.
+
+steps:
+- name: kill_stray_cuda
+  uses: kill_stray_cuda
+
+- name: enable_mps
+  uses: enable_mps
+
+- name: driver_reset
+  uses: xnvme_driver_reset
+
+- name: sync
+  uses: git_sync
+  with:
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: install_xnvme
+  uses: install_xnvme
+  with:
+    xnvme_src: /root/xnvme
+    xnvme_branch: main
+
+- name: build
+  uses: remote_build
+  with:
+    llama_src: /root/llama.cpp
+    llama_build: /root/llama.cpp/build
+    cuda_arch: "86"
+
+- name: mount_source_drive
+  uses: setup_dataset
+  with:
+    pci_addr: "0000:01:00.0"
+    namespace: 1
+    mount_point: /mnt/gguf-src
+    gguf_src: ""
+    force_format: false
+
+- name: fetch_llama_70b
+  uses: fetch_model
+  with:
+    gguf_src: /mnt/gguf-src/Llama-3.3-70B-Instruct-Q4_K_M.gguf
+    gguf_url: https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf?download=true
+
+- name: split_gguf
+  uses: split_gguf
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-gguf-split
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Instruct-Q4_K_M.gguf
+    dst_prefix: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M
+    n_shards: 4
+
+- name: prepare_dma_c1
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-0
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    gguf_extents_path: /root/dma-c1.extents.json
+
+- name: prepare_dma_c2
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-1
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf
+    gguf_extents_path: /root/dma-c2.extents.json
+
+- name: prepare_dma_c3
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-2
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00003-of-00004.gguf
+    gguf_extents_path: /root/dma-c3.extents.json
+
+- name: prepare_dma_c4
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-3
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00004-of-00004.gguf
+    gguf_extents_path: /root/dma-c4.extents.json
+
+- name: setup_shard_symlinks
+  uses: setup_shard_symlinks
+  with:
+    symlink_dir: /mnt/gguf-shards
+    basename: Llama-3.3-70B-Q4_K_M
+    shard_paths: "/mnt/dma-0/shard.gguf,/mnt/dma-1/shard.gguf,/mnt/dma-2/shard.gguf,/mnt/dma-3/shard.gguf"
+
+# ---------------------------------------------------------------------
+# Kernel-path baselines against the mounted 4-drive shard fleet. Each
+# loader sees all 4 shards via the symlink directory; whether they
+# actually keep 4 drives busy is what we're measuring.
+# ---------------------------------------------------------------------
+
+- name: run_mmap_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: mmap
+
+- name: run_stream_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: stream
+
+- name: run_xnvme_file_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: io_uring_file
+    direct_io: "true"
+    xnvme_cpu: "0"
+
+# ---------------------------------------------------------------------
+# Detach the whole DMA fleet from the kernel. After this the /mnt/dma-*
+# mounts are gone; the drives are open to upcie-cuda only.
+# ---------------------------------------------------------------------
+
+- name: detach_dma_c1
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    fs_mount_point: /mnt/dma-0
+
+- name: detach_dma_c2
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    fs_mount_point: /mnt/dma-1
+
+- name: detach_dma_c3
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    fs_mount_point: /mnt/dma-2
+
+- name: detach_dma_c4
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    fs_mount_point: /mnt/dma-3
+
+# ---------------------------------------------------------------------
+# upcie-cuda with per-shard drive routing. The loader detects that URI
+# count matches shard count and dispatches jobs by file_idx (drive-i
+# owns file_idx == i). Metadata (GGUF headers + tensor tables) is read
+# from /mnt/gguf-src's split shard files on the kernel-attached source
+# drive; bulk weights flow direct-into-tensor from the detached fleet.
+# ---------------------------------------------------------------------
+
+- name: run_upcie_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uris: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    xnvme_dma_extents: "/root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json"

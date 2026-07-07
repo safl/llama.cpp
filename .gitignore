@@ -154,3 +154,5 @@ a.out.*
 AGENTS.local.md
 .pi/SYSTEM.md
 cijoe/cijoe-output/
+cijoe/cijoe-archive/
+cijoe/scripts/__pycache__/

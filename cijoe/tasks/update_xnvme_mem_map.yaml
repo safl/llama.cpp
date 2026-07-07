@@ -1,0 +1,13 @@
+doc: |
+  Repoint /root/xnvme on warp at safl/xNVMe#feat-mem-map and rebuild.
+  Gives us xnvme_mem_map / xnvme_mem_unmap on the upcie-cuda backend so
+  the llama.cpp loader can DMA directly into tensor VRAM.
+
+steps:
+- name: update
+  uses: update_xnvme
+  with:
+    xnvme_src: /root/xnvme
+    remote_name: safl
+    remote_url: https://github.com/safl/xNVMe.git
+    branch: feat-mem-map

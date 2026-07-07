@@ -1,0 +1,4 @@
+doc: inspect /root/xnvme state on warp
+steps:
+- name: probe
+  uses: inspect_xnvme

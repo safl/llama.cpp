@@ -1,0 +1,9 @@
+doc: |
+  One-shot: dump current driver bindings for the drives the workflow
+  cares about.
+
+steps:
+- name: check
+  uses: check_nvme_bindings
+  with:
+    pci_addrs: "0000:01:00.0,0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"

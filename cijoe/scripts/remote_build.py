@@ -30,14 +30,15 @@ def main(args, cijoe):
         log.error("cmake configure failed")
         return err
 
-    # Build all three llama.cpp front-ends. llama-completion is what
-    # run_baseline / run_parallel_instances time (tty-free one-shot).
-    # llama-cli and llama-server are built alongside so an operator
-    # can poke at models interactively / over HTTP against the same
-    # libllama.so without hitting an ABI mismatch from a stale binary.
+    # Build the llama.cpp binaries the bench + iteration workflows use:
+    # - llama-completion is the tty-free one-shot that run_baseline times.
+    # - llama-cli and llama-server ride along so an operator can poke at
+    #   models against the same libllama.so without ABI-mismatch traps.
+    # - llama-gguf-split turns a monolithic .gguf into shard files for
+    #   the sharded P2P bench (bench_cold_start_shards.yaml step 009).
     err, _ = cijoe.run(
         f"cmake --build {args.llama_build} {jobs} "
-        f"--target llama-completion llama-cli llama-server"
+        f"--target llama-completion llama-cli llama-server llama-gguf-split"
     )
     if err:
         log.error("cmake build failed")

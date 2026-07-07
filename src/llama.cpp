@@ -9,6 +9,7 @@
 #include "llama-model-loader.h"
 #include "llama-model-saver.h"
 #include "llama-model.h"
+#include "llama-p2p-registry.h"
 
 #include "ggml.h"
 #include "ggml-cpp.h"
@@ -98,6 +99,19 @@ void llama_backend_init(void) {
 
     if (!ggml_backend_reg_count()) {
         ggml_backend_load_all();
+    }
+
+    // Backends are now available; safe to open upcie-cuda devs and install
+    // the ggml-cuda buffer alloc hook. When LLAMA_XNVME_DMA_URIS (plural) or
+    // LLAMA_XNVME_DMA_URI (singular) is set, this pre-opens the drives and
+    // arranges for every subsequent CUDA backend allocation to fire an
+    // async xnvme_mem_map registration in the background.
+    {
+        const char * uris_env = std::getenv("LLAMA_XNVME_DMA_URIS");
+        if (!uris_env || !*uris_env) uris_env = std::getenv("LLAMA_XNVME_DMA_URI");
+        if (uris_env && *uris_env) {
+            (void) llama_p2p_registry_init(uris_env);
+        }
     }
 }
 

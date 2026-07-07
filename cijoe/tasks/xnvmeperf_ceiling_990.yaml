@@ -1,0 +1,18 @@
+doc: |
+  Synthetic ceiling test: xnvmeperf cuda-run against the four 990 PROs
+  (0000:c1..c4:00.0) on warp. Reports MiB/s at 1, 2, 4 drives so the
+  aggregate scaling on the current PCIe topology is visible.
+
+  Drives must already be bound to uio_pci_generic (they are, from the
+  last workflow's detach step). If not, run xnvme-driver first with
+  DRIVER_OVERRIDE=uio_pci_generic PCI_WHITELIST=..., or run
+  bench_cold_start_single_model.yaml through its detach steps.
+
+steps:
+- name: run_perf
+  uses: xnvmeperf_ceiling
+  with:
+    pci_addrs: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    qdepth: 64
+    iosize: 131072
+    runtime: 5

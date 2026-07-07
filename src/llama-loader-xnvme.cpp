@@ -1,5 +1,6 @@
 #include "llama-loader-xnvme.h"
 #include "llama-impl.h"
+#include "llama-p2p-registry.h"
 
 #ifdef LLAMA_USE_XNVME
 
@@ -143,7 +144,7 @@ bool llama_loader_xnvme_run(
     }
 
     const uint32_t qd      = std::max<uint32_t>(env_u32("LLAMA_XNVME_QD",      64), 2);
-    const uint32_t io_size = std::max<uint32_t>(env_u32("LLAMA_XNVME_IO_SIZE", 128 * 1024), 4096);
+    const uint32_t io_size = std::max<uint32_t>(env_u32("LLAMA_XNVME_IO_SIZE", 512 * 1024), 4096);
     const uint32_t n_slots = qd;
 
     // Optionally pin the submitter thread to a dedicated CPU core so the
@@ -224,127 +225,209 @@ bool llama_loader_xnvme_run(
         }
     }
 
-    // One pinned host buffer for the whole ring, sliced n_slots ways.
+    // Compute per-file alignment now so we can size the pinned host pool
+    // to the largest requirement and reject setups where io_size is too
+    // small for any file.
+    std::vector<size_t> file_align(files.size(), 1);
+    for (size_t i = 0; i < files.size(); ++i) {
+        size_t align = 1;
+        if (use_direct_io && files[i]->has_direct_io()) {
+            align = files[i]->read_alignment();
+            if (align == 0) align = 1;
+        }
+        if (align > io_size) {
+            teardown(false);
+            LLAMA_LOG_WARN("%s: io_size (%u) is smaller than file %zu's alignment (%zu); falling back to STREAM\n",
+                           __func__, io_size, i, align);
+            return false;
+        }
+        file_align[i] = align;
+    }
+
+    // Per-file slot ring: each file's queue gets its own qd slots so
+    // rotating across files doesn't clobber an in-flight read's buffer
+    // just because we visited a different file's queue. Total pinned
+    // host buffer grows to n_files * n_slots * io_size.
+    const size_t total_slots = files.size() * n_slots;
     ggml_backend_buffer_t slot_buffer =
-        ggml_backend_buft_alloc_buffer(host_buft, static_cast<size_t>(n_slots) * io_size);
+        ggml_backend_buft_alloc_buffer(host_buft, total_slots * io_size);
     if (!slot_buffer) {
         teardown(true);
         return false;
     }
 
     uint8_t * slot_base = static_cast<uint8_t *>(ggml_backend_buffer_get_base(slot_buffer));
-
     ggml_backend_dev_t dev = ggml_backend_get_device(upload_backend);
-    std::vector<slot> slots(n_slots);
-    for (uint32_t i = 0; i < n_slots; ++i) {
-        slots[i].host_buf = slot_base + static_cast<size_t>(i) * io_size;
-        slots[i].event    = ggml_backend_event_new(dev);
-    }
 
     load_state st;
     st.upload_backend = upload_backend;
 
-    bool cancelled = false;
-    uint32_t next_slot = 0;
-
-    for (const auto & job : jobs) {
-        if (cancelled || st.err.load(std::memory_order_relaxed) != 0) break;
-
-        struct xnvme_queue * q = queues[job.file_idx];
-
-        size_t align = 1;
-        if (use_direct_io && files[job.file_idx]->has_direct_io()) {
-            align = files[job.file_idx]->read_alignment();
-            if (align == 0) align = 1;
+    // Per-file cursor holds its queue, slot ring, outstanding gate, and the
+    // subset of jobs that read from this file. The rotate loop below walks
+    // all cursors in order, poking each queue and refilling from that
+    // file's cursor until either the queue is full or the file is done.
+    // For n_files==1 the topology degenerates to the pre-refactor
+    // single-cursor behaviour.
+    struct file_cursor {
+        struct xnvme_queue *      queue = nullptr;
+        std::vector<slot>         slots;
+        uint32_t                  next_slot = 0;
+        size_t                    align = 1;
+        std::atomic<uint64_t>     outstanding{0};
+        std::vector<size_t>       job_indices;
+        size_t                    job_cursor    = 0;
+        size_t                    src_off_cur   = 0;
+        size_t                    dst_off_cur   = 0;
+        size_t                    remaining_cur = 0;
+        file_cursor() = default;
+        file_cursor(const file_cursor &) = delete;
+        file_cursor & operator=(const file_cursor &) = delete;
+    };
+    std::vector<std::unique_ptr<file_cursor>> cursors;
+    cursors.reserve(files.size());
+    for (size_t i = 0; i < files.size(); ++i) {
+        auto c = std::unique_ptr<file_cursor>(new file_cursor);
+        c->queue = queues[i];
+        c->align = file_align[i];
+        c->slots.resize(n_slots);
+        for (uint32_t k = 0; k < n_slots; ++k) {
+            const size_t global_slot = i * n_slots + k;
+            c->slots[k].host_buf = slot_base + global_slot * io_size;
+            c->slots[k].event    = ggml_backend_event_new(dev);
         }
-        if (align > io_size) {
-            teardown(false);
-            LLAMA_LOG_WARN("%s: io_size (%u) is smaller than the file's alignment (%zu); falling back to STREAM\n",
-                           __func__, io_size, align);
-            for (auto & s : slots) if (s.event) ggml_backend_event_free(s.event);
+        cursors.push_back(std::move(c));
+    }
+
+    // Partition jobs by file_idx onto per-file cursors. Preserves each
+    // file's disk-order (jobs upstream are sorted (file_idx, offs)).
+    for (size_t j = 0; j < jobs.size(); ++j) {
+        const uint16_t fi = jobs[j].file_idx;
+        if (fi >= cursors.size()) {
+            LLAMA_LOG_WARN("%s: job %zu has file_idx=%u beyond files.size()=%zu\n",
+                           __func__, j, (unsigned) fi, cursors.size());
+            for (auto & c : cursors) {
+                for (auto & s : c->slots) if (s.event) ggml_backend_event_free(s.event);
+            }
             ggml_backend_buffer_free(slot_buffer);
+            teardown(true);
+            return false;
+        }
+        cursors[fi]->job_indices.push_back(j);
+    }
+
+    // Free the per-file dev/queue arrays -- ownership has moved into
+    // cursors' non-owning pointers, and the cursors' unique_ptr lifetime
+    // spans the rest of this function.
+    (void) devs;  // devs still owned locally, released at the end.
+
+    // Submit one chunk for cursor `c`. Returns true iff a chunk was
+    // submitted (or the cursor is done and there is nothing to do);
+    // false when the queue has no free ctx or a free slot right now.
+    auto submit_one = [&](file_cursor & c) -> bool {
+        // Advance to the next job in this file if the current is done.
+        while (c.remaining_cur == 0) {
+            if (c.job_cursor >= c.job_indices.size()) return false;
+            const auto & job = jobs[c.job_indices[c.job_cursor]];
+            c.src_off_cur   = job.offs;
+            c.dst_off_cur   = 0;
+            c.remaining_cur = job.n_size;
+        }
+        const auto & job = jobs[c.job_indices[c.job_cursor]];
+
+        uint64_t file_read_start = align_down(c.src_off_cur, c.align);
+        size_t   head_skip       = c.src_off_cur - file_read_start;
+        size_t   want_ceiling    = io_size - head_skip;
+        if (c.align > 1 && want_ceiling > (c.align - 1)) {
+            want_ceiling -= (c.align - 1);
+        }
+        size_t want = std::min<size_t>(c.remaining_cur, want_ceiling);
+        if (want == 0) {
+            st.err.store(EINVAL, std::memory_order_relaxed);
+            return false;
+        }
+        uint64_t file_read_end = align_up(c.src_off_cur + want, c.align);
+        uint64_t read_len      = file_read_end - file_read_start;
+        if (read_len > io_size) {
+            read_len = io_size;
+            file_read_end = file_read_start + read_len;
+            want = (file_read_end > c.src_off_cur) ? (file_read_end - c.src_off_cur) : 0;
+            if (want > c.remaining_cur) want = c.remaining_cur;
+        }
+
+        slot & s = c.slots[c.next_slot];
+        if (s.needs_wait) {
+            ggml_backend_event_synchronize(s.event);
+            s.needs_wait = false;
+        }
+        c.next_slot = (c.next_slot + 1) % c.slots.size();
+
+        struct xnvme_cmd_ctx * ctx = xnvme_cmd_ctx_from_queue(c.queue);
+        if (!ctx) return false;
+
+        s.tensor     = job.tensor;
+        s.tensor_off = c.dst_off_cur;
+        s.skip       = head_skip;
+        s.len        = want;
+        s.is_host    = job.is_host;
+        s.state      = &st;
+
+        ctx->async.cb     = on_completion;
+        ctx->async.cb_arg = &s;
+
+        int rc;
+        do {
+            rc = xnvme_file_pread(ctx, s.host_buf, static_cast<size_t>(read_len),
+                                  static_cast<off_t>(file_read_start));
+            if (rc == -EBUSY) xnvme_queue_poke(c.queue, 0);
+        } while (rc == -EBUSY);
+        if (rc) {
+            xnvme_queue_put_cmd_ctx(c.queue, ctx);
+            st.err.store(rc < 0 ? -rc : rc, std::memory_order_relaxed);
             return false;
         }
 
-        size_t remaining = job.n_size;
-        size_t src_off   = job.offs;
-        size_t dst_off   = 0;
+        c.outstanding.fetch_add(1, std::memory_order_release);
+        st.outstanding.fetch_add(1, std::memory_order_release);
+        c.src_off_cur   += want;
+        c.dst_off_cur   += want;
+        c.remaining_cur -= want;
 
-        while (remaining) {
-            uint64_t file_read_start = align_down(src_off, align);
-            size_t   head_skip       = src_off - file_read_start;
-
-            size_t want_ceiling = io_size - head_skip;
-            if (align > 1 && want_ceiling > (align - 1)) {
-                want_ceiling -= (align - 1);
-            }
-            size_t want = std::min<size_t>(remaining, want_ceiling);
-            if (want == 0) {
-                st.err.store(EINVAL, std::memory_order_relaxed);
-                break;
-            }
-
-            uint64_t file_read_end = align_up(src_off + want, align);
-            uint64_t read_len      = file_read_end - file_read_start;
-            if (read_len > io_size) {
-                read_len = io_size;
-                file_read_end = file_read_start + read_len;
-                want = (file_read_end > src_off) ? (file_read_end - src_off) : 0;
-                if (want > remaining) want = remaining;
-            }
-
-            slot & s = slots[next_slot];
-            next_slot = (next_slot + 1) % n_slots;
-
-            if (s.needs_wait) {
-                ggml_backend_event_synchronize(s.event);
-                s.needs_wait = false;
-            }
-            // Only poke when we actually need capacity. Submits between
-            // pokes accumulate in the io_uring SQ so the first flush to
-            // the kernel lands as a batch of ~qd requests, giving the
-            // drive real queue pressure to fan out.
-            while (st.outstanding.load(std::memory_order_acquire) >= qd) {
-                xnvme_queue_poke(q, 0);
-            }
-
-            struct xnvme_cmd_ctx * ctx = xnvme_cmd_ctx_from_queue(q);
-            while (!ctx) {
-                xnvme_queue_poke(q, 0);
-                ctx = xnvme_cmd_ctx_from_queue(q);
-            }
-
-            s.tensor     = job.tensor;
-            s.tensor_off = dst_off;
-            s.skip       = head_skip;
-            s.len        = want;
-            s.is_host    = job.is_host;
-            s.state      = &st;
-
-            ctx->async.cb     = on_completion;
-            ctx->async.cb_arg = &s;
-
-            int rc;
-            do {
-                rc = xnvme_file_pread(ctx, s.host_buf, static_cast<size_t>(read_len),
-                                      static_cast<off_t>(file_read_start));
-                if (rc == -EBUSY) xnvme_queue_poke(q, 0);
-            } while (rc == -EBUSY);
-
-            if (rc) {
-                xnvme_queue_put_cmd_ctx(q, ctx);
-                st.err.store(rc < 0 ? -rc : rc, std::memory_order_relaxed);
-                break;
-            }
-
-            st.outstanding.fetch_add(1, std::memory_order_release);
-
-            src_off   += want;
-            dst_off   += want;
-            remaining -= want;
+        if (c.remaining_cur == 0) {
+            size_done += job.n_size;
+            c.job_cursor++;
         }
+        return true;
+    };
 
-        size_done += job.n_size;
+    // Initial fill: for each file cursor, submit until its queue is full
+    // or its assigned partition is exhausted.
+    bool cancelled = false;
+    for (auto & c : cursors) {
+        while (submit_one(*c)) { /* keep filling */ }
+        if (st.err.load(std::memory_order_relaxed) != 0) { cancelled = true; break; }
+    }
+    if (progress_cb && !progress_cb(
+            static_cast<float>(size_done) / static_cast<float>(size_data),
+            progress_ud)) {
+        cancelled = true;
+    }
+
+    // Rotate loop: poke each queue, refill from tail; exit when every
+    // cursor's partition is exhausted and no I/O remains outstanding.
+    // The completion callback fires from xnvme_queue_poke and decrements
+    // st.outstanding (the shared gate) but not the per-cursor counter -
+    // that's fine because we exit on (all-cursors-done && shared-zero),
+    // and the per-cursor counter only informs the picker on retry.
+    while (!cancelled && st.err.load(std::memory_order_relaxed) == 0) {
+        bool any_pending = false;
+        for (auto & c : cursors) {
+            xnvme_queue_poke(c->queue, 0);
+            while (submit_one(*c)) { /* keep filling */ }
+            if (c->job_cursor < c->job_indices.size()) any_pending = true;
+        }
+        const bool any_outstanding =
+            st.outstanding.load(std::memory_order_acquire) > 0;
+        if (!any_pending && !any_outstanding) break;
         if (progress_cb && !progress_cb(
                 static_cast<float>(size_done) / static_cast<float>(size_data),
                 progress_ud)) {
@@ -352,17 +435,19 @@ bool llama_loader_xnvme_run(
         }
     }
 
-    for (auto * q : queues) {
-        if (!q) continue;
-        int rc = xnvme_queue_drain(q);
+    // Drain all queues, then retire any in-flight H->D copies.
+    for (auto & c : cursors) {
+        int rc = xnvme_queue_drain(c->queue);
         if (rc < 0) {
             LLAMA_LOG_WARN("%s: xnvme_queue_drain returned %d\n", __func__, rc);
         }
     }
-    for (auto & s : slots) {
-        if (s.needs_wait) {
-            ggml_backend_event_synchronize(s.event);
-            s.needs_wait = false;
+    for (auto & c : cursors) {
+        for (auto & s : c->slots) {
+            if (s.needs_wait) {
+                ggml_backend_event_synchronize(s.event);
+                s.needs_wait = false;
+            }
         }
     }
 
@@ -372,8 +457,10 @@ bool llama_loader_xnvme_run(
                        __func__, st.err.load(std::memory_order_relaxed));
     }
 
-    for (auto & s : slots) {
-        if (s.event) ggml_backend_event_free(s.event);
+    for (auto & c : cursors) {
+        for (auto & s : c->slots) {
+            if (s.event) ggml_backend_event_free(s.event);
+        }
     }
     ggml_backend_buffer_free(slot_buffer);
     for (auto * q : queues) if (q) xnvme_queue_term(q);
@@ -706,7 +793,7 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     const size_t n_drives = uris.size();
 
     const uint32_t qd      = std::max<uint32_t>(env_u32("LLAMA_XNVME_QD",      64), 2);
-    const uint32_t io_size = std::max<uint32_t>(env_u32("LLAMA_XNVME_IO_SIZE", 128 * 1024), 4096);
+    const uint32_t io_size = std::max<uint32_t>(env_u32("LLAMA_XNVME_IO_SIZE", 512 * 1024), 4096);
     const uint32_t n_slots = qd;
 
     // Optional CPU pin. Accept a single CPU (backwards compat) or a comma
@@ -729,6 +816,18 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
     }
 
+    // If the process-global P2P registry was set up (via env var at library
+    // load time, or explicit init), we reuse the devs it opened AND skip the
+    // per-load xnvme_mem_map cost - the registry already fired async maps at
+    // ggml-cuda buffer alloc time, so by now they're finished (or almost).
+    const auto * registry_devs = llama_p2p_registry_devs();
+    const bool   use_registry  = registry_devs && registry_devs->size() == n_drives;
+    if (registry_devs && registry_devs->size() != n_drives) {
+        LLAMA_LOG_WARN("%s: P2P registry has %zu dev(s) but %zu URI(s) requested; "
+                       "falling back to per-load open+mem_map\n",
+                       __func__, registry_devs->size(), n_drives);
+    }
+
     // Owning storage for the fleet. Vector of unique_ptrs because upcie_drive
     // is non-movable (atomic member).
     std::vector<std::unique_ptr<upcie_drive>> drives;
@@ -737,6 +836,8 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     upcie_state st;
 
     // Helper: tear down everything allocated so far and return false.
+    // When the P2P registry owns the devs (and mappings) we do NOT close
+    // them here - registry cleanup happens at process exit.
     auto teardown_and_fail = [&](const char * why) -> bool {
         LLAMA_LOG_WARN("%s: %s; falling back to STREAM\n", __func__, why);
         for (auto & d : drives) {
@@ -744,11 +845,13 @@ static bool llama_loader_xnvme_run_upcie_cuda(
                 if (s.dma_buf) xnvme_buf_free(d->dev, s.dma_buf);
                 if (s.event)   cudaEventDestroy(s.event);
             }
-            for (void * base : d->mapped_buffers) {
-                xnvme_mem_unmap(d->dev, base);
+            if (!use_registry) {
+                for (void * base : d->mapped_buffers) {
+                    xnvme_mem_unmap(d->dev, base);
+                }
             }
             if (d->queue) xnvme_queue_term(d->queue);
-            if (d->dev)   xnvme_dev_close(d->dev);
+            if (d->dev && !use_registry) xnvme_dev_close(d->dev);
         }
         if (st.stream) cudaStreamDestroy(st.stream);
         if (have_prev_affinity) sched_setaffinity(0, sizeof(prev_affinity), &prev_affinity);
@@ -775,7 +878,11 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     for (size_t i = 0; i < n_drives; ++i) {
         auto d = std::unique_ptr<upcie_drive>(new upcie_drive);
         d->uri = uris[i];
-        d->dev = xnvme_dev_open(d->uri.c_str(), &opts);
+        if (use_registry) {
+            d->dev = (*registry_devs)[i];
+        } else {
+            d->dev = xnvme_dev_open(d->uri.c_str(), &opts);
+        }
         if (!d->dev) {
             char msg[256];
             std::snprintf(msg, sizeof(msg),
@@ -854,25 +961,58 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
         total_bytes += job.n_size;
     }
-    const size_t target_bytes = (total_bytes + n_drives - 1) / n_drives;
-    size_t assigned_bytes = 0;
-    size_t drive_i = 0;
-    for (size_t j = 0; j < jobs.size(); ++j) {
-        drives[drive_i]->job_indices.push_back(j);
-        assigned_bytes += jobs[j].n_size;
-        if (drive_i + 1 < n_drives && assigned_bytes >= (drive_i + 1) * target_bytes) {
-            drive_i++;
+    // Two partition modes:
+    //   PER-FILE (sharded): if the URI list length matches the number of
+    //     distinct file_idx values in `jobs`, each drive holds one shard
+    //     of a split GGUF (drive-i owns file_idx == i). Route every job to
+    //     its owning drive.
+    //   BY-BYTES (mirrored): each URI's drive holds a byte-identical copy
+    //     of the file, so any drive can serve any tensor. Spread jobs
+    //     round-robin by cumulative bytes.
+    // Sharded is the 1x-storage production shape; mirrored is the
+    //     multi-copy demo shape.
+    uint16_t max_file_idx = 0;
+    for (const auto & job : jobs) {
+        if (job.file_idx > max_file_idx) max_file_idx = job.file_idx;
+    }
+    const size_t n_files = static_cast<size_t>(max_file_idx) + 1;
+    const bool   per_file_partition = (n_files == n_drives) && (n_drives > 1);
+    if (per_file_partition) {
+        LLAMA_LOG_WARN("%s: per-file partition: %zu shard(s) mapped 1:1 to %zu drive(s)\n",
+                       __func__, n_files, n_drives);
+        for (size_t j = 0; j < jobs.size(); ++j) {
+            drives[jobs[j].file_idx]->job_indices.push_back(j);
+        }
+    } else {
+        LLAMA_LOG_WARN("%s: by-bytes partition: %zu file(s) shared across %zu drive(s) (mirrored layout)\n",
+                       __func__, n_files, n_drives);
+        const size_t target_bytes = (total_bytes + n_drives - 1) / n_drives;
+        size_t assigned_bytes = 0;
+        size_t drive_i = 0;
+        for (size_t j = 0; j < jobs.size(); ++j) {
+            drives[drive_i]->job_indices.push_back(j);
+            assigned_bytes += jobs[j].n_size;
+            if (drive_i + 1 < n_drives && assigned_bytes >= (drive_i + 1) * target_bytes) {
+                drive_i++;
+            }
         }
     }
 
-    // Register every distinct ggml backend buffer with each drive via
-    // xnvme_mem_map so aligned reads DMA straight into tensor VRAM
-    // (skipping the D2D bounce that dominates our per-tensor overhead).
-    // ggml packs many tensors into one cudaMalloc'd buffer, so the number
-    // of registrations is small (a handful, not one per tensor). The
-    // registry inside upcie-cuda is refcounted, so overlapping registrations
-    // amortize down to one dma-buf per 2 MiB VA chunk anyway.
-    {
+    // Ensure every ggml backend buffer we're about to write into has been
+    // mem_map'd on every drive. When the process-global P2P registry is
+    // active it has been firing async xnvme_mem_map calls at ggml-cuda
+    // buffer alloc time; we just wait for the last stragglers here (usually
+    // already done by the time load_all_data is called). Otherwise (no
+    // registry, e.g. someone forgot to set LLAMA_XNVME_DMA_URIS at library
+    // load time) we do the mem_map ourselves per drive.
+    if (use_registry) {
+        const auto t0 = std::chrono::steady_clock::now();
+        llama_p2p_registry_barrier();
+        const auto t1 = std::chrono::steady_clock::now();
+        LLAMA_LOG_WARN("%s: P2P registry barrier: %.1f ms (mem_maps already in flight)\n",
+                       __func__,
+                       std::chrono::duration<double, std::milli>(t1 - t0).count());
+    } else {
         std::vector<std::pair<void *, size_t>> unique_bufs;
         std::vector<void *> seen_bases;
         for (const auto & job : jobs) {
@@ -885,18 +1025,8 @@ static bool llama_loader_xnvme_run_upcie_cuda(
             seen_bases.push_back(base);
             unique_bufs.emplace_back(base, sz);
         }
-        LLAMA_LOG_WARN("%s: registering %zu unique tensor buffer(s) with %zu drive(s) via xnvme_mem_map\n",
+        LLAMA_LOG_WARN("%s: registering %zu unique tensor buffer(s) with %zu drive(s) via xnvme_mem_map (no P2P registry)\n",
                        __func__, unique_bufs.size(), n_drives);
-        {
-            size_t direct_hits = 0;
-            size_t total_scan = 0;
-            for (const auto & j : jobs) {
-                total_scan++;
-                if (j.tensor && j.tensor->buffer) direct_hits++;
-            }
-            LLAMA_LOG_WARN("%s: %zu/%zu jobs have tensor->buffer set\n",
-                           __func__, direct_hits, total_scan);
-        }
         for (auto & d : drives) {
             for (auto & bs : unique_bufs) {
                 const auto t0 = std::chrono::steady_clock::now();
@@ -1102,8 +1232,16 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     }
 
     const auto t_submit_end = std::chrono::steady_clock::now();
-    LLAMA_LOG_WARN("%s: submit+drain-outstanding phase took %.1f ms\n", __func__,
-                   std::chrono::duration<double, std::milli>(t_submit_end - t_submit_start).count());
+    {
+        const double ms = std::chrono::duration<double, std::milli>(t_submit_end - t_submit_start).count();
+        const double gib_s = ms > 0.0
+            ? (static_cast<double>(total_bytes) / (1024.0 * 1024.0 * 1024.0)) / (ms / 1000.0)
+            : 0.0;
+        LLAMA_LOG_WARN("%s: submit+drain phase %.1f ms for %.1f MiB = %.1f GiB/s aggregate\n",
+                       __func__, ms,
+                       static_cast<double>(total_bytes) / (1024.0 * 1024.0),
+                       gib_s);
+    }
 
     // Drain outstanding I/O on every queue.
     for (auto & d : drives) {
@@ -1153,16 +1291,20 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     }
 
     // Cleanup: buffers, events, mem_map registrations, queues, devs.
+    // When the P2P registry owns the devs+mappings, we leave both alone so
+    // subsequent loads in the same process can reuse the pre-mapped state.
     for (auto & d : drives) {
         for (auto & s : d->slots) {
             if (s.dma_buf) xnvme_buf_free(d->dev, s.dma_buf);
             if (s.event)   cudaEventDestroy(s.event);
         }
-        for (void * base : d->mapped_buffers) {
-            xnvme_mem_unmap(d->dev, base);
+        if (!use_registry) {
+            for (void * base : d->mapped_buffers) {
+                xnvme_mem_unmap(d->dev, base);
+            }
         }
         if (d->queue) xnvme_queue_term(d->queue);
-        if (d->dev)   xnvme_dev_close(d->dev);
+        if (d->dev && !use_registry) xnvme_dev_close(d->dev);
     }
     cudaStreamDestroy(st.stream);
     if (have_prev_affinity) sched_setaffinity(0, sizeof(prev_affinity), &prev_affinity);

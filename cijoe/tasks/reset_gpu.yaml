@@ -1,0 +1,4 @@
+doc: Free up VRAM held by stale MPS / llama processes.
+steps:
+- name: reset
+  uses: reset_gpu_state
