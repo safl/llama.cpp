@@ -90,9 +90,24 @@ def main(args, cijoe):
             f"{loader_flag}{dio_flag}{xnvme_be_flag} "
             f"< /dev/null"
         )
-        err, _ = cijoe.run(cmd)
+        err, state = cijoe.run(cmd)
         if err:
             log.error(f"iter {i}: llama-completion exited nonzero")
             return err
+
+        # Sanity-check the loader path actually did what its label claims.
+        # llama.cpp will emit a "falling back to STREAM" line if the xnvme
+        # loader failed to open a dev / mem_map / etc, and continue with
+        # the stream path. That gives a plausible-looking number that is
+        # NOT the loader we asked for. Fail hard so exp scripts don't
+        # silently mis-report.
+        out = state.output()
+        if "falling back to STREAM" in out:
+            log.error(f"iter {i}: --loader {args.loader} silently fell back to STREAM")
+            return 1
+        if args.loader == "xnvme" and args.xnvme_be == "upcie-cuda":
+            if "llama_loader_xnvme_run_upcie_cuda: submit+drain phase" not in out:
+                log.error(f"iter {i}: upcie-cuda loader did not emit submit+drain summary")
+                return 1
 
     return 0

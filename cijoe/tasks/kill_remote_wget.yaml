@@ -1,0 +1,8 @@
+doc: |
+  Kill lingering wget on the target host and remove the partially
+  downloaded gemma file so a re-run doesn't skip it as "already
+  present but too small".
+
+steps:
+- name: kill_wget
+  uses: kill_remote_wget

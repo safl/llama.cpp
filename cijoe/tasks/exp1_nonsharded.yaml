@@ -1,0 +1,96 @@
+doc: |
+  Experiment 1: nonsharded model loading (1 drive, all four loaders).
+
+  Full 42 GB Llama-3.3-70B-Instruct-Q4_K_M.gguf on ONE drive (c1).
+  Each loader path reads all 42 GB from that single NVMe:
+
+    - mmap                        (built-in kernel path with mmap)
+    - stream                      (built-in kernel path, no mmap)
+    - xnvme io_uring_file         (kernel path with O_DIRECT)
+    - upcie-cuda                  (userspace P2P NVMe->VRAM)
+
+  MPS disabled: exp1 confirmed MPS helps kernel loaders 4-14% but
+  otherwise obscures loader identity. Keeping it off across both
+  experiments for apples-to-apples.
+
+steps:
+- name: kill_stray_cuda
+  uses: kill_stray_cuda
+
+- name: disable_mps
+  uses: disable_mps
+
+- name: prepare_dma_c1
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-0
+    fs_dst_name: model.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Instruct-Q4_K_M.gguf
+    gguf_extents_path: /root/full-c1.extents.json
+
+- name: run_mmap
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/dma-0/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: mmap
+
+- name: run_stream
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/dma-0/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: stream
+
+- name: run_xnvme_file
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/dma-0/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: io_uring_file
+    direct_io: "true"
+    xnvme_cpu: "0"
+
+- name: detach_c1
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    fs_mount_point: /mnt/dma-0
+
+- name: upcie_prime
+  uses: upcie_prime
+  with:
+    pci_addrs: "0000:c1:00.0"
+    runtime: 2
+
+- name: run_upcie_cuda
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-src/Llama-3.3-70B-Instruct-Q4_K_M.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uris: "0000:c1:00.0"
+    xnvme_dma_extents: "/root/full-c1.extents.json"

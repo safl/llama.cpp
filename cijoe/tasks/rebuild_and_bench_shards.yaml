@@ -1,0 +1,165 @@
+doc: |
+  Rebuild the 4 DMA shards from the intact source drive and re-run
+  the full 4-loader shootout, WITHOUT reinstalling xnvme (so a local
+  WIP xnvme build with batched cudamem_mapping is preserved).
+
+  Preconditions on target:
+    - /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-{00001..00004}-of-00004.gguf
+      exists (the source drive is intact).
+    - libxnvme.so on the target reflects the change under test.
+    - Drives 0000:c1..c4:00.0 are bound to nvme (or uio_pci_generic;
+      setup_dma_target's xfs-fiemap layout handles either state).
+
+steps:
+- name: kill_stray_cuda
+  uses: kill_stray_cuda
+
+- name: enable_mps
+  uses: enable_mps
+
+- name: sync
+  uses: git_sync
+  with:
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: build
+  uses: remote_build
+  with:
+    llama_src: /root/llama.cpp
+    llama_build: /root/llama.cpp/build
+    cuda_arch: "86"
+
+- name: prepare_dma_c1
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-0
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    gguf_extents_path: /root/dma-c1.extents.json
+
+- name: prepare_dma_c2
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-1
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf
+    gguf_extents_path: /root/dma-c2.extents.json
+
+- name: prepare_dma_c3
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-2
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00003-of-00004.gguf
+    gguf_extents_path: /root/dma-c3.extents.json
+
+- name: prepare_dma_c4
+  uses: setup_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    dma_namespace: 1
+    layout: xfs-fiemap
+    defer_detach: "true"
+    fs_mount_point: /mnt/dma-3
+    fs_dst_name: shard.gguf
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00004-of-00004.gguf
+    gguf_extents_path: /root/dma-c4.extents.json
+
+- name: setup_shard_symlinks
+  uses: setup_shard_symlinks
+  with:
+    symlink_dir: /mnt/gguf-shards
+    basename: Llama-3.3-70B-Q4_K_M
+    shard_paths: "/mnt/dma-0/shard.gguf,/mnt/dma-1/shard.gguf,/mnt/dma-2/shard.gguf,/mnt/dma-3/shard.gguf"
+
+- name: run_mmap_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: mmap
+
+- name: run_stream_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: stream
+
+- name: run_xnvme_file_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: io_uring_file
+    direct_io: "true"
+    xnvme_cpu: "0"
+
+- name: detach_dma_c1
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c1:00.0"
+    fs_mount_point: /mnt/dma-0
+
+- name: detach_dma_c2
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c2:00.0"
+    fs_mount_point: /mnt/dma-1
+
+- name: detach_dma_c3
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c3:00.0"
+    fs_mount_point: /mnt/dma-2
+
+- name: detach_dma_c4
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: "0000:c4:00.0"
+    fs_mount_point: /mnt/dma-3
+
+- name: run_upcie_shards
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    xnvme_be: upcie-cuda
+    xnvme_cpu: "0"
+    xnvme_dma_uris: "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0"
+    xnvme_dma_extents: "/root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json"

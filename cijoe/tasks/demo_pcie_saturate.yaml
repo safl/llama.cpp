@@ -1,0 +1,37 @@
+doc: |
+  Demo workflow: saturate the RTX A6000's PCIe input with N parallel
+  NVMe streams via xnvmeperf cuda-run.
+
+  Uses the four Samsung 980 PROs on warp that sit under the same root
+  complex as the GPU (0000:80) - shortest peer-to-peer path, no need
+  to traverse the inter-CCD Infinity Fabric.
+
+  Progressively runs 1, 2, then 4 drives so the throughput scaling is
+  visible in one output. nvidia-smi's pcie.rx.mibps is sampled during
+  each stage; expect it to climb from ~5 GB/s (one drive) toward the
+  PCIe 4.0 x16 realistic ceiling of ~25 GB/s at four drives.
+
+  Reproducible entrypoint. Run from within cijoe/:
+
+      cijoe -c configs/warp.toml tasks/demo_pcie_saturate.yaml
+
+steps:
+- name: sync
+  uses: git_sync
+  with:
+    upstream: https://github.com/ggml-org/llama.cpp.git
+    branch: bench-cold-start
+    base_branch: master
+    remote_alias: target
+    local_path: /home/odus/git/llama.cpp
+    remote_path: /root/llama.cpp
+
+- name: demo_pcie_saturate
+  uses: demo_pcie_saturate
+  with:
+    # Four 980 PROs on the GPU's root complex (0000:80). Expect them to
+    # scale close to line rate as we add drives.
+    pci_addrs: "0000:82:00.0,0000:83:00.0,0000:84:00.0,0000:85:00.0"
+    qdepth: 64
+    iosize: 131072
+    runtime: 5

@@ -1,0 +1,4 @@
+doc: Ask the CUDA driver whether RECOMMENDED alloc granularity is bigger than MINIMUM.
+steps:
+- name: probe
+  uses: probe_alloc_granularity
