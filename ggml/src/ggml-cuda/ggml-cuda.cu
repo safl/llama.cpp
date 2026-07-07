@@ -668,8 +668,27 @@ struct ggml_backend_cuda_buffer_context {
     }
 };
 
+// Optional observer hooks for out-of-tree P2P integrations. See
+// ggml_backend_cuda_set_buffer_hooks in the public header for the contract.
+static ggml_cuda_buffer_alloc_hook_t g_cuda_buffer_alloc_hook = nullptr;
+static ggml_cuda_buffer_free_hook_t  g_cuda_buffer_free_hook  = nullptr;
+static void *                        g_cuda_buffer_hook_ud    = nullptr;
+
+extern "C" void ggml_backend_cuda_set_buffer_hooks(
+    ggml_cuda_buffer_alloc_hook_t alloc_hook,
+    ggml_cuda_buffer_free_hook_t  free_hook,
+    void * user_data)
+{
+    g_cuda_buffer_alloc_hook = alloc_hook;
+    g_cuda_buffer_free_hook  = free_hook;
+    g_cuda_buffer_hook_ud    = user_data;
+}
+
 static void ggml_backend_cuda_buffer_free_buffer(ggml_backend_buffer_t buffer) {
     ggml_backend_cuda_buffer_context * ctx = (ggml_backend_cuda_buffer_context *)buffer->context;
+    if (g_cuda_buffer_free_hook) {
+        g_cuda_buffer_free_hook(g_cuda_buffer_hook_ud, ctx->device, ctx->dev_ptr);
+    }
     delete ctx;
 }
 
@@ -821,6 +840,14 @@ static ggml_backend_buffer_t ggml_backend_cuda_buffer_type_alloc_buffer(ggml_bac
     }
 
     ggml_backend_cuda_buffer_context * ctx = new ggml_backend_cuda_buffer_context(buft_ctx->device, dev_ptr);
+
+    // Fire alloc hook AFTER the buffer is fully allocated but BEFORE returning
+    // control so an out-of-tree observer (e.g. a P2P NVMe registry) can
+    // register the range and get its own setup started while llama.cpp
+    // continues with tensor placement in the newly-allocated buffer.
+    if (g_cuda_buffer_alloc_hook) {
+        g_cuda_buffer_alloc_hook(g_cuda_buffer_hook_ud, buft_ctx->device, dev_ptr, size);
+    }
 
     return ggml_backend_buffer_init(buft, ggml_backend_cuda_buffer_interface, ctx, size);
 }

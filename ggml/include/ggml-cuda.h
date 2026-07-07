@@ -42,6 +42,21 @@ GGML_BACKEND_API void ggml_backend_cuda_unregister_host_buffer(void * buffer);
 
 GGML_BACKEND_API ggml_backend_reg_t ggml_backend_cuda_reg(void);
 
+// Optional observer hooks fired when the CUDA backend's device buffer type
+// allocates or frees a buffer via cudaMalloc. Intended for out-of-tree P2P
+// integrations (e.g. registering the freshly-allocated VRAM range with a
+// user-space NVMe stack) that need to react to allocations without owning
+// the ggml backend. Set to NULL to disable. The hooks fire from whichever
+// thread calls the buffer type's alloc/free path; the callee is responsible
+// for its own synchronization.
+typedef void (*ggml_cuda_buffer_alloc_hook_t)(void * user_data, int device, void * base, size_t size);
+typedef void (*ggml_cuda_buffer_free_hook_t) (void * user_data, int device, void * base);
+
+GGML_BACKEND_API void ggml_backend_cuda_set_buffer_hooks(
+    ggml_cuda_buffer_alloc_hook_t alloc_hook,
+    ggml_cuda_buffer_free_hook_t  free_hook,
+    void * user_data);
+
 #ifdef  __cplusplus
 }
 #endif
