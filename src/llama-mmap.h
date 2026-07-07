@@ -15,6 +15,11 @@ using llama_mlocks = std::vector<std::unique_ptr<llama_mlock>>;
 
 struct llama_file {
     llama_file(const char * fname, const char * mode, bool use_direct_io = false);
+
+    // Original path passed at construction, or "(file*)" when the file was
+    // adopted from a FILE*. Available for callers that need to open the
+    // same path through a different API (e.g. the xNVMe loader).
+    const std::string & path() const;
     llama_file(FILE * file);
     ~llama_file();
 

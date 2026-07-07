@@ -206,6 +206,13 @@ extern "C" {
         LLAMA_CONTEXT_TYPE_MTP     = 1,
     };
 
+    enum llama_loader_type {
+        LLAMA_LOADER_DEFAULT = 0, // derive from use_mmap / use_direct_io
+        LLAMA_LOADER_MMAP    = 1, // mmap the .gguf and let ggml pull pages
+        LLAMA_LOADER_STREAM  = 2, // ring of pinned staging buffers + pread
+        LLAMA_LOADER_XNVME   = 3, // xNVMe async ring + pipelined H->D copy
+    };
+
     // TODO: simplify (https://github.com/ggml-org/llama.cpp/pull/9294#pullrequestreview-2286561979)
     typedef struct llama_token_data {
         llama_token id; // token id
@@ -299,7 +306,17 @@ extern "C" {
         const struct llama_model_tensor_buft_override * tensor_buft_overrides;
 
         int32_t n_gpu_layers; // number of layers to store in VRAM, a negative value means all layers
-        enum llama_split_mode split_mode; // how to split the model across multiple GPUs
+        enum llama_split_mode  split_mode;  // how to split the model across multiple GPUs
+        enum llama_loader_type loader;      // weight loader to use; LLAMA_LOADER_DEFAULT derives from use_mmap/use_direct_io
+
+        // xNVMe backend name (opts.be) when loader == LLAMA_LOADER_XNVME.
+        // NULL uses the loader's default ("io_uring_file"). Common values:
+        //   "io_uring_file" - io_uring pread on the mounted file (default)
+        //   "io_uring_cmd"  - NVMe passthrough on /dev/ngXnY (raw)
+        //   "io_uring_bdev" - io_uring pread on the block device
+        //   "libaio_file"   - libaio pread on the mounted file
+        //   "thrpool_file"  - thread pool pread on the mounted file
+        const char * xnvme_be;
 
         // the GPU that is used for the entire model when split_mode is LLAMA_SPLIT_MODE_NONE
         int32_t main_gpu;

@@ -26,6 +26,7 @@ add_library(llama
             llama-kv-cache-iswa.cpp
             llama-kv-cache-dsa.cpp
             llama-kv-cache-dsv4.cpp
+            llama-loader-xnvme.cpp
             llama-memory.cpp
             llama-memory-hybrid.cpp
             llama-memory-hybrid-iswa.cpp
@@ -54,6 +55,23 @@ target_include_directories(llama PUBLIC ../include)
 target_compile_features   (llama PRIVATE cxx_std_17) # don't bump
 
 target_link_libraries(llama PUBLIC ggml)
+
+# xNVMe async weight loader: LLAMA_XNVME=ON auto-detects via pkg-config.
+# If xnvme is not found, --loader xnvme falls back to STREAM at runtime.
+option(LLAMA_XNVME "llama: link xNVMe for --loader xnvme" ON)
+if (LLAMA_XNVME)
+    find_package(PkgConfig QUIET)
+    if (PkgConfig_FOUND)
+        pkg_check_modules(XNVME IMPORTED_TARGET xnvme)
+    endif()
+    if (XNVME_FOUND)
+        target_link_libraries(llama PRIVATE PkgConfig::XNVME)
+        target_compile_definitions(llama PRIVATE LLAMA_USE_XNVME)
+        message(STATUS "llama: xNVMe loader enabled (version ${XNVME_VERSION})")
+    else()
+        message(STATUS "llama: xNVMe not found via pkg-config; --loader xnvme will fall back to STREAM")
+    endif()
+endif()
 
 if (BUILD_SHARED_LIBS)
     set_target_properties(llama PROPERTIES POSITION_INDEPENDENT_CODE ON)

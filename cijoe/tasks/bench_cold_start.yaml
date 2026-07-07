@@ -75,7 +75,7 @@ steps:
     gguf_dst_name: model.gguf
     force_format: true
 
-- name: run_baseline
+- name: run_llama_mmap
   uses: run_baseline
   with:
     llama_bin: /root/llama.cpp/build/bin/llama-completion
@@ -84,9 +84,9 @@ steps:
     prompt: "hi"
     n_tokens: 1
     iterations: 1
-    no_mmap: false
+    loader: mmap
 
-- name: run_baseline_no_mmap
+- name: run_llama_stream
   uses: run_baseline
   with:
     llama_bin: /root/llama.cpp/build/bin/llama-completion
@@ -95,7 +95,47 @@ steps:
     prompt: "hi"
     n_tokens: 1
     iterations: 1
-    no_mmap: true
+    loader: stream
+
+- name: run_llama_xnvme_buffered
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    direct_io: false
+    xnvme_be: io_uring_file
+
+- name: run_llama_xnvme_dio
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    direct_io: true
+    xnvme_be: io_uring_file
+
+- name: run_llama_xnvme_dio_pinned
+  uses: run_baseline
+  with:
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    gguf_path: /mnt/gguf/model.gguf
+    n_gpu_layers: 999
+    prompt: "hi"
+    n_tokens: 1
+    iterations: 1
+    loader: xnvme
+    direct_io: true
+    xnvme_be: io_uring_file
+    xnvme_cpu: "0"
 
 - name: run_io_uring_load
   uses: run_io_uring_load

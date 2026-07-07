@@ -572,6 +572,9 @@ struct common_params {
     bool input_prefix_bos  = false; // prefix BOS to user inputs, preceding input_prefix
     bool use_mmap          = true;  // enable mmap to use filesystem cache
     bool use_direct_io     = false; // read from disk without buffering
+
+    llama_loader_type loader = LLAMA_LOADER_DEFAULT; // weight loader; DEFAULT derives from use_mmap/use_direct_io
+    std::string xnvme_be     = "";                   // xNVMe backend name (opts.be) when loader == XNVME
     bool use_mlock         = false; // use mlock to keep model in memory
     bool verbose_prompt    = false; // print prompt tokens before generation
     bool display_prompt    = true;  // print prompt before generation

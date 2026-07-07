@@ -280,7 +280,8 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
         const std::string & fname, std::vector<std::string> & splits, FILE * file, llama_model_params & params) {
     try {
         llama_model_loader ml(metadata, set_tensor_data, set_tensor_data_ud, fname, splits, file, params.use_mmap, params.use_direct_io,
-            params.check_tensors, params.no_alloc, params.kv_overrides, params.tensor_buft_overrides);
+            params.check_tensors, params.no_alloc, params.kv_overrides, params.tensor_buft_overrides,
+            params.loader, params.xnvme_be);
 
         ml.print_info();
         std::unique_ptr<llama_model> model_ptr(llama_model_create(ml, params));
@@ -414,6 +415,11 @@ struct llama_model * llama_model_init_from_user(
     std::vector<std::string> splits = {};
     params.use_mmap = false;
     params.use_extra_bufts = false;
+    // Vocab-only load reads no bulk tensor data. Downgrade LLAMA_LOADER_XNVME
+    // (and preserve DEFAULT / STREAM / MMAP for downstream default resolution).
+    if (params.loader == LLAMA_LOADER_XNVME) {
+        params.loader = LLAMA_LOADER_STREAM;
+    }
     return llama_model_load_from_file_impl(metadata, set_tensor_data, set_tensor_data_ud, path_model, splits, /*file*/ nullptr, params);
 }
 // deprecated

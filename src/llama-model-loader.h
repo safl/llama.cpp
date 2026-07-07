@@ -119,6 +119,15 @@ struct llama_model_loader {
     ggml_backend_buffer_type_t first_moved_from_buft = nullptr;
     ggml_backend_buffer_type_t first_moved_to_buft = nullptr;
 
+    // Weight loader selected by the caller. LLAMA_LOADER_DEFAULT is
+    // resolved from use_mmap / use_direct_io in the ctor to preserve
+    // legacy behaviour; every other value is honoured verbatim.
+    enum llama_loader_type loader_type = LLAMA_LOADER_DEFAULT;
+
+    // xNVMe backend name (opts.be) when loader_type == LLAMA_LOADER_XNVME.
+    // Empty means "use the loader's default backend" (io_uring_file).
+    std::string xnvme_be;
+
     llama_model_loader(
         struct gguf_context * metadata,
         llama_model_set_tensor_data_t set_tensor_data,
@@ -131,7 +140,9 @@ struct llama_model_loader {
         bool check_tensors,
         bool no_alloc,
         const llama_model_kv_override * param_overrides_p,
-        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p);
+        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p,
+        enum llama_loader_type loader = LLAMA_LOADER_DEFAULT,
+        const char * xnvme_be = nullptr);
 
     template<typename T>
     typename std::enable_if<std::is_integral<T>::value, bool>::type

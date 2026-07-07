@@ -2421,6 +2421,32 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_NUMA"));
     add_opt(common_arg(
+        {"--loader"}, "TYPE",
+        "weight loader to use:\n"
+        "- default: pick from --mmap / --no-mmap (legacy behaviour)\n"
+        "- mmap:    memory-map the .gguf\n"
+        "- stream:  ring of pinned staging buffers + synchronous pread\n"
+        "- xnvme:   xNVMe async ring + pipelined H->D copy",
+        [](common_params & params, const std::string & value) {
+            /**/ if (value == "default")  { params.loader = LLAMA_LOADER_DEFAULT; }
+            else if (value == "mmap")     { params.loader = LLAMA_LOADER_MMAP;    }
+            else if (value == "stream")   { params.loader = LLAMA_LOADER_STREAM;  }
+            else if (value == "xnvme")    { params.loader = LLAMA_LOADER_XNVME;   }
+            else { throw std::invalid_argument("invalid value"); }
+        }
+    ).set_env("LLAMA_ARG_LOADER"));
+    add_opt(common_arg(
+        {"--xnvme-be"}, "NAME",
+        "xNVMe backend name (opts.be) when --loader xnvme:\n"
+        "- io_uring_file (default): io_uring pread on the mounted file\n"
+        "- io_uring_cmd: NVMe passthrough on /dev/ngXnY (raw)\n"
+        "- io_uring_bdev: io_uring pread on the block device\n"
+        "- libaio_file, thrpool_file, posix_file, emu_file: other file backends",
+        [](common_params & params, const std::string & value) {
+            params.xnvme_be = value;
+        }
+    ).set_env("LLAMA_ARG_XNVME_BE"));
+    add_opt(common_arg(
         {"-dev", "--device"}, "<dev1,dev2,..>",
         "comma-separated list of devices to use for offloading (none = don't offload)\n"
         "use --list-devices to see a list of available devices",

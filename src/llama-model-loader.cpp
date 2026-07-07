@@ -4,6 +4,7 @@
 #include "ggml.h"
 #include "gguf.h"
 #include "llama-hparams.h"
+#include "llama-loader-xnvme.h"
 
 #include <algorithm>
 #include <array>
@@ -526,12 +527,28 @@ llama_model_loader::llama_model_loader(
         bool check_tensors,
         bool no_alloc,
         const llama_model_kv_override * param_overrides_p,
-        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p)
+        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p,
+        enum llama_loader_type loader,
+        const char * xnvme_be_p)
         : metadata(meta), set_tensor_data(set_tensor_data), set_tensor_data_ud(set_tensor_data_ud) {
     int trace = 0;
     if (getenv("LLAMA_TRACE")) {
         trace = atoi(getenv("LLAMA_TRACE"));
     }
+
+    // Resolve LLAMA_LOADER_DEFAULT from the legacy bools so callers that
+    // do not set params.loader keep their existing behaviour bit-for-bit.
+    // For non-mmap loaders force use_mmap=false; for MMAP we leave use_mmap
+    // alone so callers can still request an mmap-shaped loader with
+    // no_alloc=true (the FIT dry-run path in common_params_fit_impl relies
+    // on that combination).
+    switch (loader) {
+        case LLAMA_LOADER_DEFAULT: loader_type = use_mmap ? LLAMA_LOADER_MMAP : LLAMA_LOADER_STREAM; break;
+        case LLAMA_LOADER_MMAP:    loader_type = LLAMA_LOADER_MMAP;   break;
+        case LLAMA_LOADER_STREAM:  use_mmap = false; loader_type = LLAMA_LOADER_STREAM; break;
+        case LLAMA_LOADER_XNVME:   use_mmap = false; loader_type = LLAMA_LOADER_XNVME;  break;
+    }
+    xnvme_be = (xnvme_be_p && xnvme_be_p[0] != '\0') ? xnvme_be_p : "";
 
     if (param_overrides_p != nullptr) {
         for (const struct llama_model_kv_override * p = param_overrides_p; p->key[0] != 0; p++) {
@@ -1525,7 +1542,54 @@ bool llama_model_loader::load_all_data(
             ggml_backend_name(upload_backend));
     }
 
-    for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+    // XNVME loader path: pipelined ring reader + async H->D copy per chunk.
+    // Requires an upload_backend and cannot honour check_tensors (per-chunk
+    // hashing splits rows). Falls back to the STREAM tensor loop below on
+    // any setup failure or when built without LLAMA_USE_XNVME.
+    bool xnvme_ok = false;
+    if (loader_type == LLAMA_LOADER_XNVME && upload_backend && !check_tensors) {
+        std::vector<llama_loader_xnvme_job> jobs;
+        jobs.reserve(64);
+        for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+            const auto * weight = get_weight(ggml_get_name(cur));
+            if (weight == nullptr) continue;
+            llama_loader_xnvme_job j{};
+            j.tensor   = cur;
+            j.file_idx = weight->idx;
+            j.offs     = weight->offs;
+            j.n_size   = ggml_nbytes(cur);
+            j.is_host  = ggml_backend_buffer_is_host(cur->buffer);
+            jobs.push_back(j);
+        }
+        std::sort(jobs.begin(), jobs.end(),
+                  [](const llama_loader_xnvme_job & a, const llama_loader_xnvme_job & b) {
+                      if (a.file_idx != b.file_idx) return a.file_idx < b.file_idx;
+                      return a.offs < b.offs;
+                  });
+
+        auto * buf = bufs.count(0) ? bufs.at(0) : nullptr;
+        ggml_backend_buffer_type_t host_buft = nullptr;
+        if (buf) {
+            auto * buft = ggml_backend_buffer_get_type(buf);
+            auto * dev  = ggml_backend_buft_get_device(buft);
+            if (dev) host_buft = ggml_backend_dev_host_buffer_type(dev);
+        }
+
+        const size_t size_done_snapshot = size_done;
+        xnvme_ok = llama_loader_xnvme_run(jobs, files, upload_backend, host_buft,
+                                          use_direct_io, xnvme_be,
+                                          size_done, size_data,
+                                          progress_callback, progress_callback_user_data);
+        if (xnvme_ok) {
+            LLAMA_LOG_INFO("%s: xnvme loader completed (be='%s')\n", __func__,
+                           xnvme_be.empty() ? "io_uring_file" : xnvme_be.c_str());
+        } else {
+            LLAMA_LOG_WARN("%s: xnvme loader unavailable or failed; falling back to STREAM\n", __func__);
+            size_done = size_done_snapshot;
+        }
+    }
+
+    for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL && !xnvme_ok; cur = ggml_get_next_tensor(ctx, cur)) {
         const auto * weight = get_weight(ggml_get_name(cur));
         if (weight == nullptr) {
             // this can happen with split experts models
