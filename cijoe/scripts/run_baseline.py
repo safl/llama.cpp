@@ -45,6 +45,8 @@ def add_args(parser: ArgumentParser):
                         help="Comma-separated PCIe URIs (via LLAMA_XNVME_DMA_URIS); enables the multi-drive rotate loader")
     parser.add_argument("--xnvme_dma_extents", type=str, default="",
                         help="Path to extents JSON (via LLAMA_XNVME_DMA_EXTENTS); for --xnvme_dma_uris pass a comma-separated list, one per URI")
+    parser.add_argument("--xnvme_force_scratch", type=str, default="",
+                        help="'1' to force every submission through the scratch+D2D path (LLAMA_XNVME_FORCE_SCRATCH)")
 
 
 def _truthy(v: str) -> bool:
@@ -71,9 +73,12 @@ def main(args, cijoe):
             env_parts.append(f"LLAMA_XNVME_DMA_URI={args.xnvme_dma_uri}")
         if args.xnvme_dma_extents:
             env_parts.append(f"LLAMA_XNVME_DMA_EXTENTS={args.xnvme_dma_extents}")
+        if args.xnvme_force_scratch:
+            env_parts.append(f"LLAMA_XNVME_FORCE_SCRATCH={args.xnvme_force_scratch}")
         env_prefix = f"{' '.join(env_parts)} " if env_parts else ""
 
         cmd = (
+            f"ulimit -n 262144; "
             f"{env_prefix}"
             f"/usr/bin/time -f 'wallclock: %e s | rss %M KiB' "
             f"{args.llama_bin} "

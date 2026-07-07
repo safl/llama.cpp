@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -440,7 +441,8 @@ struct upcie_state;
 // event in the latter case) and refuses to reuse a READ_ACTIVE slot — that
 // would clobber an in-flight DMA.
 struct upcie_slot {
-    void *               dma_buf         = nullptr; // VRAM, io_size bytes
+    void *               dma_buf         = nullptr; // scratch VRAM buffer (io_size bytes)
+    void *               direct_target   = nullptr; // when non-null, NVMe writes directly here and no D2D is needed
     cudaEvent_t          event           = nullptr;
     bool                 in_flight_read  = false;
     bool                 needs_wait      = false;
@@ -455,6 +457,10 @@ struct upcie_slot {
 struct upcie_state {
     cudaStream_t          stream = nullptr;
     std::atomic<int>      err{0};
+    std::atomic<uint64_t> direct_reads{0};
+    std::atomic<uint64_t> scratch_reads{0};
+    std::atomic<uint64_t> direct_bytes{0};
+    std::atomic<uint64_t> scratch_bytes{0};
 };
 
 // Per-drive state. Each drive owns one xnvme_dev + one xnvme_queue + its
@@ -480,6 +486,15 @@ struct upcie_drive {
     size_t                src_off_cur   = 0;   // in-progress cursor within current job
     size_t                dst_off_cur   = 0;
     size_t                remaining_cur = 0;
+
+    // ggml backend buffers registered via xnvme_mem_map so NVMe can DMA
+    // directly into tensor VRAM instead of bouncing through a scratch slot.
+    // Owned pointers; each must be xnvme_mem_unmap'd on teardown.
+    std::vector<void *>   mapped_buffers;
+
+    // Per-drive submission counters, for balancing the fan-out.
+    std::atomic<uint64_t> subs_count{0};
+    std::atomic<uint64_t> subs_bytes{0};
 
     // Constructor and assignment operators must be deleted because
     // std::atomic is not copyable / movable.
@@ -600,17 +615,21 @@ static void on_completion_upcie(struct xnvme_cmd_ctx * ctx, void * cb_arg) {
 
     // NVMe read has landed - regardless of success. Clear in_flight_read
     // so the picker knows this slot's buffer is no longer being written by
-    // the SSD. If we hit a CPL error we skip the D2D and needs_wait stays
-    // false, leaving the slot immediately reusable (though we're about to
-    // abort anyway).
+    // the SSD.
     s->in_flight_read = false;
 
     if (xnvme_cmd_ctx_cpl_status(ctx)) {
         st->err.store(EIO, std::memory_order_relaxed);
+    } else if (s->direct_target) {
+        // Direct path: NVMe wrote straight into the tensor's VRAM (registered
+        // via xnvme_mem_map). No D2D bounce, no event needed - slot is
+        // immediately reusable.
+        s->needs_wait = false;
     } else {
-        // Both src and dst are device pointers. cudaMemcpyAsync on kind
-        // cudaMemcpyDeviceToDevice runs at HBM bandwidth (~800 GB/s), i.e.
-        // effectively free compared to the NVMe read.
+        // Scratch path: NVMe wrote into the slot's scratch VRAM. Copy just
+        // the payload bytes into the tensor's VRAM. cudaMemcpyAsync
+        // DeviceToDevice runs at HBM bandwidth (~800 GB/s), so this is only
+        // used for edge reads (unaligned head, non-LBA-multiple tail).
         cudaMemcpyAsync(static_cast<uint8_t *>(s->tensor->data) + s->tensor_off,
                         static_cast<uint8_t *>(s->dma_buf) + s->skip,
                         s->len, cudaMemcpyDeviceToDevice, st->stream);
@@ -724,6 +743,9 @@ static bool llama_loader_xnvme_run_upcie_cuda(
             for (auto & s : d->slots) {
                 if (s.dma_buf) xnvme_buf_free(d->dev, s.dma_buf);
                 if (s.event)   cudaEventDestroy(s.event);
+            }
+            for (void * base : d->mapped_buffers) {
+                xnvme_mem_unmap(d->dev, base);
             }
             if (d->queue) xnvme_queue_term(d->queue);
             if (d->dev)   xnvme_dev_close(d->dev);
@@ -843,6 +865,59 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
     }
 
+    // Register every distinct ggml backend buffer with each drive via
+    // xnvme_mem_map so aligned reads DMA straight into tensor VRAM
+    // (skipping the D2D bounce that dominates our per-tensor overhead).
+    // ggml packs many tensors into one cudaMalloc'd buffer, so the number
+    // of registrations is small (a handful, not one per tensor). The
+    // registry inside upcie-cuda is refcounted, so overlapping registrations
+    // amortize down to one dma-buf per 2 MiB VA chunk anyway.
+    {
+        std::vector<std::pair<void *, size_t>> unique_bufs;
+        std::vector<void *> seen_bases;
+        for (const auto & job : jobs) {
+            if (!job.tensor || !job.tensor->buffer) continue;
+            void * base = ggml_backend_buffer_get_base(job.tensor->buffer);
+            const size_t sz = ggml_backend_buffer_get_size(job.tensor->buffer);
+            if (std::find(seen_bases.begin(), seen_bases.end(), base) != seen_bases.end()) {
+                continue;
+            }
+            seen_bases.push_back(base);
+            unique_bufs.emplace_back(base, sz);
+        }
+        LLAMA_LOG_WARN("%s: registering %zu unique tensor buffer(s) with %zu drive(s) via xnvme_mem_map\n",
+                       __func__, unique_bufs.size(), n_drives);
+        {
+            size_t direct_hits = 0;
+            size_t total_scan = 0;
+            for (const auto & j : jobs) {
+                total_scan++;
+                if (j.tensor && j.tensor->buffer) direct_hits++;
+            }
+            LLAMA_LOG_WARN("%s: %zu/%zu jobs have tensor->buffer set\n",
+                           __func__, direct_hits, total_scan);
+        }
+        for (auto & d : drives) {
+            for (auto & bs : unique_bufs) {
+                const auto t0 = std::chrono::steady_clock::now();
+                int rc = xnvme_mem_map(d->dev, bs.first, bs.second);
+                const auto t1 = std::chrono::steady_clock::now();
+                const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                LLAMA_LOG_WARN("%s: xnvme_mem_map(dev='%s', base=%p, size=%zu MiB) took %.1f ms\n",
+                               __func__, d->uri.c_str(), bs.first,
+                               bs.second / (1024 * 1024), ms);
+                if (rc) {
+                    char msg[256];
+                    std::snprintf(msg, sizeof(msg),
+                                  "xnvme_mem_map(dev='%s', base=%p, size=%zu) failed: rc=%d",
+                                  d->uri.c_str(), bs.first, bs.second, rc);
+                    return teardown_and_fail(msg);
+                }
+                d->mapped_buffers.push_back(bs.first);
+            }
+        }
+    }
+
     // Helper that submits ONE chunk (up to io_size_eff or the current
     // extent's tail, whichever is smaller) for drive `d`. Returns true if
     // a chunk was submitted (or the drive is done), false if the queue
@@ -917,6 +992,24 @@ static bool llama_loader_xnvme_run_upcie_cuda(
             return false;
         }
 
+        // Direct-into-tensor when the read boundaries line up with LBA
+        // granularity: head_skip == 0 AND read length is an LBA-multiple.
+        // The NVMe controller writes `nlb * lba_nbytes` bytes starting at
+        // the given buffer address; when want == nlb * lba_nbytes there is
+        // no overshoot beyond the tensor's target region. Scratch stays as
+        // the fallback for edge reads (unaligned head, non-LBA-multiple
+        // tail).
+        // LLAMA_XNVME_FORCE_SCRATCH=1 disables the direct path entirely
+        // for A/B testing - we still register buffers via xnvme_mem_map
+        // and take on that cost, so comparing against the direct-enabled
+        // run isolates the per-submit direct-vs-scratch delta.
+        static const bool force_scratch = std::getenv("LLAMA_XNVME_FORCE_SCRATCH") != nullptr
+                                       && std::atoi(std::getenv("LLAMA_XNVME_FORCE_SCRATCH")) != 0;
+        const bool direct_eligible = !force_scratch &&
+                                     (head_skip == 0) &&
+                                     (want % d.lba_nbytes == 0) &&
+                                     (job.tensor && job.tensor->data);
+
         s.tensor         = job.tensor;
         s.tensor_off     = d.dst_off_cur;
         s.skip           = head_skip;
@@ -924,13 +1017,24 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         s.drive          = &d;
         s.state          = &st;
         s.in_flight_read = true;
+        s.direct_target  = direct_eligible
+            ? static_cast<uint8_t *>(job.tensor->data) + d.dst_off_cur
+            : nullptr;
+        if (direct_eligible) {
+            st.direct_reads.fetch_add(1, std::memory_order_relaxed);
+            st.direct_bytes.fetch_add(want, std::memory_order_relaxed);
+        } else {
+            st.scratch_reads.fetch_add(1, std::memory_order_relaxed);
+            st.scratch_bytes.fetch_add(want, std::memory_order_relaxed);
+        }
 
         ctx->async.cb     = on_completion_upcie;
         ctx->async.cb_arg = &s;
 
+        void * dma_target = s.direct_target ? s.direct_target : s.dma_buf;
         int r;
         do {
-            r = xnvme_nvm_read(ctx, d.nsid, slba, nlb - 1, s.dma_buf, nullptr);
+            r = xnvme_nvm_read(ctx, d.nsid, slba, nlb - 1, dma_target, nullptr);
             if (r == -EBUSY) xnvme_queue_poke(d.queue, 0);
         } while (r == -EBUSY);
         if (r) {
@@ -941,6 +1045,8 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
 
         d.outstanding.fetch_add(1, std::memory_order_release);
+        d.subs_count.fetch_add(1, std::memory_order_relaxed);
+        d.subs_bytes.fetch_add(want, std::memory_order_relaxed);
         d.src_off_cur   += want;
         d.dst_off_cur   += want;
         d.remaining_cur -= want;
@@ -951,6 +1057,8 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
         return true;
     };
+
+    const auto t_submit_start = std::chrono::steady_clock::now();
 
     // Initial fill: for every drive, submit until the queue is full or
     // its assigned partition is exhausted.
@@ -993,6 +1101,10 @@ static bool llama_loader_xnvme_run_upcie_cuda(
         }
     }
 
+    const auto t_submit_end = std::chrono::steady_clock::now();
+    LLAMA_LOG_WARN("%s: submit+drain-outstanding phase took %.1f ms\n", __func__,
+                   std::chrono::duration<double, std::milli>(t_submit_end - t_submit_start).count());
+
     // Drain outstanding I/O on every queue.
     for (auto & d : drives) {
         xnvme_queue_drain(d->queue);
@@ -1015,11 +1127,39 @@ static bool llama_loader_xnvme_run_upcie_cuda(
                        __func__, st.err.load(std::memory_order_relaxed));
     }
 
-    // Cleanup: buffers, events, queues, devs.
+    {
+        const uint64_t dr = st.direct_reads.load(std::memory_order_relaxed);
+        const uint64_t sr = st.scratch_reads.load(std::memory_order_relaxed);
+        const uint64_t db = st.direct_bytes.load(std::memory_order_relaxed);
+        const uint64_t sb = st.scratch_bytes.load(std::memory_order_relaxed);
+        const uint64_t total_reads = dr + sr;
+        const uint64_t total_bytes = db + sb;
+        const double pct_reads = total_reads ? 100.0 * dr / total_reads : 0.0;
+        const double pct_bytes = total_bytes ? 100.0 * db / total_bytes : 0.0;
+        LLAMA_LOG_WARN("%s: direct=%lu reads (%lu MiB, %.1f%%), scratch=%lu reads (%lu MiB, %.1f%%)\n",
+                       __func__,
+                       (unsigned long) dr, (unsigned long) (db / (1024 * 1024)), pct_bytes,
+                       (unsigned long) sr, (unsigned long) (sb / (1024 * 1024)), 100.0 - pct_bytes);
+        (void) pct_reads;
+
+        for (size_t i = 0; i < drives.size(); ++i) {
+            const uint64_t rc = drives[i]->subs_count.load(std::memory_order_relaxed);
+            const uint64_t rb = drives[i]->subs_bytes.load(std::memory_order_relaxed);
+            const double pct = total_bytes ? 100.0 * (double) rb / (double) total_bytes : 0.0;
+            LLAMA_LOG_WARN("%s: drive[%zu] '%s': %lu reads, %lu MiB (%.1f%% of total)\n",
+                           __func__, i, drives[i]->uri.c_str(),
+                           (unsigned long) rc, (unsigned long) (rb / (1024 * 1024)), pct);
+        }
+    }
+
+    // Cleanup: buffers, events, mem_map registrations, queues, devs.
     for (auto & d : drives) {
         for (auto & s : d->slots) {
             if (s.dma_buf) xnvme_buf_free(d->dev, s.dma_buf);
             if (s.event)   cudaEventDestroy(s.event);
+        }
+        for (void * base : d->mapped_buffers) {
+            xnvme_mem_unmap(d->dev, base);
         }
         if (d->queue) xnvme_queue_term(d->queue);
         if (d->dev)   xnvme_dev_close(d->dev);
