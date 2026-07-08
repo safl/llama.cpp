@@ -1,0 +1,9 @@
+begin: 1783517601.8781447
+cmd: lspci -k -s 0000:c1:00.0
+cwd: None
+elapsed: 0.24781370162963867
+end: 1783517602.1259584
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1/cmd_01.output

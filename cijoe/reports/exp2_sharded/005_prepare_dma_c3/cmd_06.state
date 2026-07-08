@@ -1,0 +1,9 @@
+begin: 1783517754.9822772
+cmd: mkfs.xfs -f /dev/nvme2n1
+cwd: None
+elapsed: 2.3619000911712646
+end: 1783517757.3441772
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/005_prepare_dma_c3
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/005_prepare_dma_c3/cmd_06.output

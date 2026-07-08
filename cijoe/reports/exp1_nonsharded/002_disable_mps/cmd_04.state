@@ -1,0 +1,9 @@
+begin: 1783517601.3510127
+cmd: nvidia-smi -c DEFAULT
+cwd: None
+elapsed: 0.2625598907470703
+end: 1783517601.6135726
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/002_disable_mps
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/002_disable_mps/cmd_04.output

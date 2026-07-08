@@ -1,0 +1,9 @@
+begin: 1783517730.673285
+cmd: pkill -f nvidia-cuda-mps || true
+cwd: None
+elapsed: 0.2664656639099121
+end: 1783517730.9397507
+err: -1
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps/cmd_02.output

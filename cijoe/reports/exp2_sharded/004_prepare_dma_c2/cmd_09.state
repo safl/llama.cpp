@@ -1,0 +1,9 @@
+begin: 1783517747.2569976
+cmd: cp -v /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf /mnt/dma-1/shard.gguf
+cwd: None
+elapsed: 4.049019813537598
+end: 1783517751.3060174
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/004_prepare_dma_c2
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/004_prepare_dma_c2/cmd_09.output

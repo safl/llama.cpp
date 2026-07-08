@@ -1,0 +1,11 @@
+begin: 1783517660.9134274
+cmd: 'ulimit -n 262144; LLAMA_XNVME_CPU=0 /usr/bin/time -f ''wallclock: %e s | rss
+  %M KiB'' /root/llama.cpp/build/bin/llama-completion -m /mnt/dma-0/model.gguf -ngl
+  999 -p hi -n 1 -no-cnv --loader xnvme -dio --xnvme-be io_uring_file < /dev/null'
+cwd: None
+elapsed: 11.97267460823059
+end: 1783517672.886102
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/006_run_xnvme_file
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/006_run_xnvme_file/cmd_02.output

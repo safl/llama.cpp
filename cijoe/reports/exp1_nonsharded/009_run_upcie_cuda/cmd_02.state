@@ -1,0 +1,12 @@
+begin: 1783517689.6349566
+cmd: 'ulimit -n 262144; LLAMA_XNVME_CPU=0 LLAMA_XNVME_DMA_URIS=0000:c1:00.0 LLAMA_XNVME_DMA_EXTENTS=/root/full-c1.extents.json
+  /usr/bin/time -f ''wallclock: %e s | rss %M KiB'' /root/llama.cpp/build/bin/llama-completion
+  -m /mnt/gguf-src/Llama-3.3-70B-Instruct-Q4_K_M.gguf -ngl 999 -p hi -n 1 -no-cnv
+  --loader xnvme --xnvme-be upcie-cuda < /dev/null'
+cwd: None
+elapsed: 10.53635287284851
+end: 1783517700.1713095
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/009_run_upcie_cuda
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/009_run_upcie_cuda/cmd_02.output

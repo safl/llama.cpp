@@ -1,0 +1,9 @@
+begin: 1783517774.9483411
+cmd: ln -sf /mnt/dma-1/shard.gguf /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf
+cwd: None
+elapsed: 0.21831774711608887
+end: 1783517775.1666589
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/007_setup_shard_symlinks
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/007_setup_shard_symlinks/cmd_04.output

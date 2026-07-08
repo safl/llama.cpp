@@ -1,0 +1,9 @@
+begin: 1783517728.6335876
+cmd: pkill -f llama-completion || true
+cwd: None
+elapsed: 0.2663271427154541
+end: 1783517728.8999147
+err: -1
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/001_kill_stray_cuda
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/001_kill_stray_cuda/cmd_02.output

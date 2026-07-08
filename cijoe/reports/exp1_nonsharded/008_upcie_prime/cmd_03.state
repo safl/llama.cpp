@@ -1,0 +1,9 @@
+begin: 1783517680.2893715
+cmd: sleep 6; sync
+cwd: None
+elapsed: 6.245929002761841
+end: 1783517686.5353005
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/008_upcie_prime
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/008_upcie_prime/cmd_03.output

@@ -1,0 +1,9 @@
+begin: 1783517730.9414425
+cmd: sleep 1
+cwd: None
+elapsed: 1.2324824333190918
+end: 1783517732.173925
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps/cmd_03.output

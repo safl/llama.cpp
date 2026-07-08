@@ -1,0 +1,9 @@
+begin: 1783517598.3446875
+cmd: sleep 1 && nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
+cwd: None
+elapsed: 1.26017165184021
+end: 1783517599.604859
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/001_kill_stray_cuda
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/001_kill_stray_cuda/cmd_04.output

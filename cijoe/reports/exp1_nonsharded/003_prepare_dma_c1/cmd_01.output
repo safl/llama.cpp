@@ -1,0 +1,4 @@
+c1:00.0 Non-Volatile memory controller: Samsung Electronics Co Ltd NVMe SSD Controller S4LV008[Pascal]
+	Subsystem: Samsung Electronics Co Ltd SSD 990 PRO
+	Kernel driver in use: nvme
+	Kernel modules: nvme

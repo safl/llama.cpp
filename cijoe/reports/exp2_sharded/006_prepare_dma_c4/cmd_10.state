@@ -1,0 +1,9 @@
+begin: 1783517771.9443355
+cmd: sync
+cwd: None
+elapsed: 1.6425831317901611
+end: 1783517773.5869186
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4/cmd_10.output

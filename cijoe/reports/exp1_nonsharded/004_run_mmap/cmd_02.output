@@ -1,0 +1,26 @@
+0.00.360.805 I llama_completion: llama backend init
+0.00.360.817 I llama_completion: load the model and apply lora adapter, if any
+0.16.611.006 I llama_completion: llama threadpool init, n_threads = 32
+0.16.611.031 I 
+0.16.611.130 I system_info: n_threads = 32 (n_threads_batch = 32) / 64 | CUDA : ARCHS = 860 | USE_GRAPHS = 1 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+0.16.611.133 I 
+0.16.611.167 I sampler seed: 434375943
+0.16.611.181 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = -1
+	top_k = 40, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.800
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.16.611.188 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist 
+0.16.611.189 I generate: n_ctx = 18944, n_batch = 2048, n_predict = 1, n_keep = 1
+0.16.611.189 I 
+hi H
+
+0.16.693.357 I common_perf_print:    sampling time =       1.12 ms
+0.16.693.359 I common_perf_print:    samplers time =       0.10 ms /     3 tokens
+0.16.693.364 I common_perf_print:        load time =   15178.98 ms
+0.16.693.365 I common_perf_print: prompt eval time =      80.99 ms /     2 tokens (   40.49 ms per token,    24.70 tokens per second)
+0.16.693.366 I common_perf_print:        eval time =       0.00 ms /     1 runs   (    0.00 ms per token,      inf tokens per second)
+0.16.693.367 I common_perf_print:       total time =      82.36 ms /     3 tokens
+0.16.693.368 I common_perf_print: unaccounted time =       0.25 ms /   0.3 %      (total - sampling - prompt eval - eval) / (total)
+0.16.693.368 I common_perf_print:    graphs reused =          1
+wallclock: 18.15 s | rss 41908160 KiB

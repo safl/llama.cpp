@@ -1,0 +1,9 @@
+begin: 1783517673.3854907
+cmd: DRIVER_OVERRIDE=uio_pci_generic PCI_WHITELIST='0000:c1:00.0' xnvme-driver
+cwd: None
+elapsed: 2.5792076587677
+end: 1783517675.9646983
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/007_detach_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/007_detach_c1/cmd_03.output

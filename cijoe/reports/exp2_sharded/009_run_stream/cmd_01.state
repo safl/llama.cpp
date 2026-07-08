@@ -1,0 +1,9 @@
+begin: 1783517795.429422
+cmd: sync && echo 3 > /proc/sys/vm/drop_caches
+cwd: None
+elapsed: 0.6746294498443604
+end: 1783517796.1040514
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/009_run_stream
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/009_run_stream/cmd_01.output

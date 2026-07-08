@@ -1,0 +1,9 @@
+begin: 1783517598.0798378
+cmd: pkill -f llama-server || true
+cwd: None
+elapsed: 0.2643122673034668
+end: 1783517598.34415
+err: -1
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/001_kill_stray_cuda
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/001_kill_stray_cuda/cmd_03.output

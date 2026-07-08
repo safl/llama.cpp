@@ -1,0 +1,9 @@
+begin: 1783517773.8186257
+cmd: xfs_bmap /mnt/dma-3/shard.gguf
+cwd: None
+elapsed: 0.2294013500213623
+end: 1783517774.048027
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4/cmd_12.output

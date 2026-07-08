@@ -1,0 +1,9 @@
+begin: 1783517730.444315
+cmd: echo quit | nvidia-cuda-mps-control 2>/dev/null || true
+cwd: None
+elapsed: 0.22797846794128418
+end: 1783517730.6722934
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/002_disable_mps/cmd_01.output

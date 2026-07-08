@@ -1,0 +1,19 @@
+begin: 1783517623.88537
+cmd: "cat > /root/full-c1.extents.json <<'EOF'\n{\n  \"layout\": \"xfs-fiemap\",\n\
+  \  \"device\": \"/dev/nvme0n1\",\n  \"pci_addr\": \"0000:c1:00.0\",\n  \"file_size\"\
+  : 42520398816,\n  \"lba_nbytes\": 512,\n  \"extents\": [\n    {\n      \"file_offset\"\
+  : 0,\n      \"lba\": 192,\n      \"length\": 8543797248\n    },\n    {\n      \"\
+  file_offset\": 8543797248,\n      \"lba\": 16687296,\n      \"length\": 8577351680\n\
+  \    },\n    {\n      \"file_offset\": 17121148928,\n      \"lba\": 33439936,\n\
+  \      \"length\": 8527020032\n    },\n    {\n      \"file_offset\": 25648168960,\n\
+  \      \"lba\": 50094272,\n      \"length\": 4416528384\n    },\n    {\n      \"\
+  file_offset\": 30064697344,\n      \"lba\": 61047432,\n      \"length\": 8581619712\n\
+  \    },\n    {\n      \"file_offset\": 38646317056,\n      \"lba\": 77808408,\n\
+  \      \"length\": 3874082816\n    }\n  ]\n}\nEOF"
+cwd: None
+elapsed: 0.2209622859954834
+end: 1783517624.1063323
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1/cmd_13.output

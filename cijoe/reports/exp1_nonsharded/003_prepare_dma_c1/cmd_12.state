@@ -1,0 +1,9 @@
+begin: 1783517623.6516035
+cmd: xfs_bmap /mnt/dma-0/model.gguf
+cwd: None
+elapsed: 0.2328507900238037
+end: 1783517623.8844543
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/003_prepare_dma_c1/cmd_12.output

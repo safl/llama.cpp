@@ -1,0 +1,9 @@
+begin: 1783517736.1985834
+cmd: mkdir -p /mnt/dma-0
+cwd: None
+elapsed: 0.22031712532043457
+end: 1783517736.4189005
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/003_prepare_dma_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/003_prepare_dma_c1/cmd_07.output

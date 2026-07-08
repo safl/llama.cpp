@@ -1,0 +1,9 @@
+begin: 1783517768.0554163
+cmd: mount /dev/nvme3n1 /mnt/dma-3
+cwd: None
+elapsed: 0.24325299263000488
+end: 1783517768.2986693
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/006_prepare_dma_c4/cmd_08.output

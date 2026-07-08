@@ -1,0 +1,11 @@
+begin: 1783517776.9195702
+cmd: 'ulimit -n 262144; /usr/bin/time -f ''wallclock: %e s | rss %M KiB'' /root/llama.cpp/build/bin/llama-completion
+  -m /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf -ngl 999 -p hi -n 1
+  -no-cnv --loader mmap < /dev/null'
+cwd: None
+elapsed: 18.49914240837097
+end: 1783517795.4187126
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/008_run_mmap
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/008_run_mmap/cmd_02.output

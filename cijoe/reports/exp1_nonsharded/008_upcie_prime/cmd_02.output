@@ -1,0 +1,11 @@
+Failed: xnvme_dev_open(0000:c1:00.0): err(-12)
+# ERR: 'cuda-run': {errno: -12, msg: 'Cannot allocate memory'}
+Running xnvmeperf with arguments:
+- Devices: [0000:c1:00.0] (total: 1)
+- io pattern: read
+- queues per device: 1
+- queue depth: 32
+- io size: 131072
+- runtime: 2
+- host_heap_size: 16777216 bytes
+- device_heap_size: 20971520 bytes

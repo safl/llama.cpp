@@ -1,0 +1,9 @@
+0000:01:00.0 (144d a810): Skipping un-whitelisted NVMe controller at 0000:01:00.0
+0000:82:00.0 (144d a80a): Skipping un-whitelisted NVMe controller at 0000:82:00.0
+0000:83:00.0 (144d a80a): Skipping un-whitelisted NVMe controller at 0000:83:00.0
+0000:84:00.0 (144d a80a): Skipping un-whitelisted NVMe controller at 0000:84:00.0
+0000:85:00.0 (144d a80a): Skipping un-whitelisted NVMe controller at 0000:85:00.0
+0000:c1:00.0 (144d a80c): Skipping un-whitelisted NVMe controller at 0000:c1:00.0
+0000:c2:00.0 (144d a80c): Skipping un-whitelisted NVMe controller at 0000:c2:00.0
+0000:c3:00.0 (144d a80c): Skipping un-whitelisted NVMe controller at 0000:c3:00.0
+0000:c4:00.0 (144d a80c): nvme -> uio_pci_generic

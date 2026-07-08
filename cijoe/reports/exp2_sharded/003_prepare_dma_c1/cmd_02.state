@@ -1,0 +1,9 @@
+begin: 1783517732.9350004
+cmd: ls /sys/bus/pci/devices/0000:c1:00.0/nvme/
+cwd: None
+elapsed: 0.22558116912841797
+end: 1783517733.1605816
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/003_prepare_dma_c1
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/003_prepare_dma_c1/cmd_02.output

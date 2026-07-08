@@ -1,0 +1,7 @@
+total 8
+drwxr-xr-x 2 root root 4096 Jul  8 15:36 .
+drwxr-xr-x 9 root root 4096 Jul  8 15:36 ..
+lrwxrwxrwx 1 root root   21 Jul  8 15:36 Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf -> /mnt/dma-0/shard.gguf
+lrwxrwxrwx 1 root root   21 Jul  8 15:36 Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf -> /mnt/dma-1/shard.gguf
+lrwxrwxrwx 1 root root   21 Jul  8 15:36 Llama-3.3-70B-Q4_K_M-00003-of-00004.gguf -> /mnt/dma-2/shard.gguf
+lrwxrwxrwx 1 root root   21 Jul  8 15:36 Llama-3.3-70B-Q4_K_M-00004-of-00004.gguf -> /mnt/dma-3/shard.gguf

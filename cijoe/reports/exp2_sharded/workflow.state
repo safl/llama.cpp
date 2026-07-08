@@ -1,0 +1,532 @@
+config: {}
+doc: "Experiment 2: sharded model loading (4 drives, all four loaders).\n\nSharded\
+  \ 40 GB Llama-3.3-70B Q4_K_M, one shard per drive\n(c1..c4 -> /mnt/dma-{0..3}).\
+  \ Each loader path reads all 40 GB\nfrom the 4-drive fleet:\n\n  - mmap        \
+  \                (kernel path, mmap-backed)\n  - stream                      (kernel\
+  \ path, read()-based)\n  - xnvme io_uring_file         (kernel path, O_DIRECT)\n\
+  \  - upcie-cuda                  (userspace P2P, per-file drive\n              \
+  \                   routing)\n\nMPS disabled for consistency with exp1.\n\nNote:\
+  \ the upcie-cuda step is preceded by an xnvmeperf-4-URI prime\nstep. Without it,\
+  \ the 4-drive registry_init inside llama-completion\nintermittently produces a dev\
+  \ with lba_nbytes=0 and falls back to\nstream. Priming with xnvmeperf clears the\
+  \ state; root cause TBD."
+status:
+  elapsed: 126.24026417732239
+  failed: 0
+  passed: 16
+  skipped: 0
+  started: 1783517728.34088
+steps:
+- description: 'One-shot: kill any lingering llama-cli / llama-completion / llama-server
+    on the target and dump current GPU memory.'
+  id: 001_kill_stray_cuda
+  name: kill_stray_cuda
+  nr: 1
+  status:
+    elapsed: 2.0929863452911377
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517728.3415666
+  uses: kill_stray_cuda
+- description: Turn CUDA MPS off and reset compute mode to DEFAULT so subsequent processes
+    see the whole VRAM.
+  id: 002_disable_mps
+  name: disable_mps
+  nr: 2
+  status:
+    elapsed: 2.24040150642395
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517730.4345667
+  uses: disable_mps
+- description: "\nPrepare a spare NVMe as the DMA target for xNVMe's upcie-cuda backend.\n\
+    \nTwo layout modes are supported. Both end with the drive detached\nfrom the kernel\
+    \ NVMe driver and bound to uio_pci_generic, and both\nemit an extents JSON that\
+    \ the loader consumes via\nLLAMA_XNVME_DMA_EXTENTS.\n\n  layout=raw (default,\
+    \ backwards compatible):\n    Copy the .gguf onto the raw device starting at LBA\
+    \ 0 via dd.\n    The drive holds a raw byte image of the file; file offset O\n\
+    \    trivially maps to LBA (O / lba_nbytes). The extents JSON has\n    a single\
+    \ entry, [{file_offset: 0, lba: 0, length: file_size}].\n\n  layout=xfs-fiemap:\n\
+    \    Format XFS on the drive, mount, copy the .gguf onto the FS as\n    a normal\
+    \ file, run xfs_bmap (FIEMAP equivalent) to capture the\n    file's on-disk extents,\
+    \ umount, then detach + bind as above.\n    The extents JSON carries one entry\
+    \ per XFS extent with the\n    per-drive LBA computed from the physical block\
+    \ offset. This is\n    the realistic \"user put their model on a real FS\" shape.\n\
+    \nIn both modes the workflow's earlier setup_dataset step must have\nstaged the\
+    \ model onto a *different* drive (the source drive,\nmounted at /mnt/gguf/model.gguf)\
+    \ so llama.cpp can open the file for\nGGUF metadata reads during the run; the\
+    \ DMA target here is the only\ndrive touched during bulk weight reads.\n"
+  id: 003_prepare_dma_c1
+  name: prepare_dma_c1
+  nr: 3
+  status:
+    elapsed: 10.593245267868042
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517732.6749852
+  uses: setup_dma_target
+  with:
+    defer_detach: 'true'
+    dma_namespace: 1
+    dma_pci_addr: 0000:c1:00.0
+    fs_dst_name: shard.gguf
+    fs_mount_point: /mnt/dma-0
+    gguf_extents_path: /root/dma-c1.extents.json
+    layout: xfs-fiemap
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+- description: "\nPrepare a spare NVMe as the DMA target for xNVMe's upcie-cuda backend.\n\
+    \nTwo layout modes are supported. Both end with the drive detached\nfrom the kernel\
+    \ NVMe driver and bound to uio_pci_generic, and both\nemit an extents JSON that\
+    \ the loader consumes via\nLLAMA_XNVME_DMA_EXTENTS.\n\n  layout=raw (default,\
+    \ backwards compatible):\n    Copy the .gguf onto the raw device starting at LBA\
+    \ 0 via dd.\n    The drive holds a raw byte image of the file; file offset O\n\
+    \    trivially maps to LBA (O / lba_nbytes). The extents JSON has\n    a single\
+    \ entry, [{file_offset: 0, lba: 0, length: file_size}].\n\n  layout=xfs-fiemap:\n\
+    \    Format XFS on the drive, mount, copy the .gguf onto the FS as\n    a normal\
+    \ file, run xfs_bmap (FIEMAP equivalent) to capture the\n    file's on-disk extents,\
+    \ umount, then detach + bind as above.\n    The extents JSON carries one entry\
+    \ per XFS extent with the\n    per-drive LBA computed from the physical block\
+    \ offset. This is\n    the realistic \"user put their model on a real FS\" shape.\n\
+    \nIn both modes the workflow's earlier setup_dataset step must have\nstaged the\
+    \ model onto a *different* drive (the source drive,\nmounted at /mnt/gguf/model.gguf)\
+    \ so llama.cpp can open the file for\nGGUF metadata reads during the run; the\
+    \ DMA target here is the only\ndrive touched during bulk weight reads.\n"
+  id: 004_prepare_dma_c2
+  name: prepare_dma_c2
+  nr: 4
+  status:
+    elapsed: 10.547346830368042
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517743.2682383
+  uses: setup_dma_target
+  with:
+    defer_detach: 'true'
+    dma_namespace: 1
+    dma_pci_addr: 0000:c2:00.0
+    fs_dst_name: shard.gguf
+    fs_mount_point: /mnt/dma-1
+    gguf_extents_path: /root/dma-c2.extents.json
+    layout: xfs-fiemap
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00002-of-00004.gguf
+- description: "\nPrepare a spare NVMe as the DMA target for xNVMe's upcie-cuda backend.\n\
+    \nTwo layout modes are supported. Both end with the drive detached\nfrom the kernel\
+    \ NVMe driver and bound to uio_pci_generic, and both\nemit an extents JSON that\
+    \ the loader consumes via\nLLAMA_XNVME_DMA_EXTENTS.\n\n  layout=raw (default,\
+    \ backwards compatible):\n    Copy the .gguf onto the raw device starting at LBA\
+    \ 0 via dd.\n    The drive holds a raw byte image of the file; file offset O\n\
+    \    trivially maps to LBA (O / lba_nbytes). The extents JSON has\n    a single\
+    \ entry, [{file_offset: 0, lba: 0, length: file_size}].\n\n  layout=xfs-fiemap:\n\
+    \    Format XFS on the drive, mount, copy the .gguf onto the FS as\n    a normal\
+    \ file, run xfs_bmap (FIEMAP equivalent) to capture the\n    file's on-disk extents,\
+    \ umount, then detach + bind as above.\n    The extents JSON carries one entry\
+    \ per XFS extent with the\n    per-drive LBA computed from the physical block\
+    \ offset. This is\n    the realistic \"user put their model on a real FS\" shape.\n\
+    \nIn both modes the workflow's earlier setup_dataset step must have\nstaged the\
+    \ model onto a *different* drive (the source drive,\nmounted at /mnt/gguf/model.gguf)\
+    \ so llama.cpp can open the file for\nGGUF metadata reads during the run; the\
+    \ DMA target here is the only\ndrive touched during bulk weight reads.\n"
+  id: 005_prepare_dma_c3
+  name: prepare_dma_c3
+  nr: 5
+  status:
+    elapsed: 10.494035005569458
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517753.8155906
+  uses: setup_dma_target
+  with:
+    defer_detach: 'true'
+    dma_namespace: 1
+    dma_pci_addr: 0000:c3:00.0
+    fs_dst_name: shard.gguf
+    fs_mount_point: /mnt/dma-2
+    gguf_extents_path: /root/dma-c3.extents.json
+    layout: xfs-fiemap
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00003-of-00004.gguf
+- description: "\nPrepare a spare NVMe as the DMA target for xNVMe's upcie-cuda backend.\n\
+    \nTwo layout modes are supported. Both end with the drive detached\nfrom the kernel\
+    \ NVMe driver and bound to uio_pci_generic, and both\nemit an extents JSON that\
+    \ the loader consumes via\nLLAMA_XNVME_DMA_EXTENTS.\n\n  layout=raw (default,\
+    \ backwards compatible):\n    Copy the .gguf onto the raw device starting at LBA\
+    \ 0 via dd.\n    The drive holds a raw byte image of the file; file offset O\n\
+    \    trivially maps to LBA (O / lba_nbytes). The extents JSON has\n    a single\
+    \ entry, [{file_offset: 0, lba: 0, length: file_size}].\n\n  layout=xfs-fiemap:\n\
+    \    Format XFS on the drive, mount, copy the .gguf onto the FS as\n    a normal\
+    \ file, run xfs_bmap (FIEMAP equivalent) to capture the\n    file's on-disk extents,\
+    \ umount, then detach + bind as above.\n    The extents JSON carries one entry\
+    \ per XFS extent with the\n    per-drive LBA computed from the physical block\
+    \ offset. This is\n    the realistic \"user put their model on a real FS\" shape.\n\
+    \nIn both modes the workflow's earlier setup_dataset step must have\nstaged the\
+    \ model onto a *different* drive (the source drive,\nmounted at /mnt/gguf/model.gguf)\
+    \ so llama.cpp can open the file for\nGGUF metadata reads during the run; the\
+    \ DMA target here is the only\ndrive touched during bulk weight reads.\n"
+  id: 006_prepare_dma_c4
+  name: prepare_dma_c4
+  nr: 6
+  status:
+    elapsed: 9.96036148071289
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517764.3096304
+  uses: setup_dma_target
+  with:
+    defer_detach: 'true'
+    dma_namespace: 1
+    dma_pci_addr: 0000:c4:00.0
+    fs_dst_name: shard.gguf
+    fs_mount_point: /mnt/dma-3
+    gguf_extents_path: /root/dma-c4.extents.json
+    layout: xfs-fiemap
+    source_gguf: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00004-of-00004.gguf
+- description: 'Create a symlink directory that presents shards on several mounts
+    as one directory.
+
+
+    llama.cpp discovers sibling shards of a split GGUF by walking the
+
+    ``basename-NNNNN-of-MMMMM.gguf`` pattern in the same directory. When
+
+    each shard lives on its own mount for parallel-drive load, we still
+
+    need one directory that presents all N shards side by side. This
+
+    script creates that directory of symlinks; the kernel resolves each
+
+    symlink to the underlying mount at open time, so reads land on the
+
+    right drive.
+
+    '
+  id: 007_setup_shard_symlinks
+  name: setup_shard_symlinks
+  nr: 7
+  status:
+    elapsed: 1.5773887634277344
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517774.2699971
+  uses: setup_shard_symlinks
+  with:
+    basename: Llama-3.3-70B-Q4_K_M
+    shard_paths: /mnt/dma-0/shard.gguf,/mnt/dma-1/shard.gguf,/mnt/dma-2/shard.gguf,/mnt/dma-3/shard.gguf
+    symlink_dir: /mnt/gguf-shards
+- description: "\nCold-start measurement for llama.cpp with a configurable loader\
+    \ path.\n\nDrops the OS page cache before each iteration, runs llama-completion\n\
+    with ``-n 1`` so it stops as soon as one token is produced, and\nrecords the wall-clock\
+    \ and max RSS via /usr/bin/time. The interval\nis dominated by the weight-load\
+    \ phase, so it is the \"seconds to\nfirst token\" figure of merit.\n\nThe same\
+    \ script drives every loader variant so their cijoe outputs\nland side by side\
+    \ under the same step template. Pass:\n\n    loader:    mmap | stream | xnvme\
+    \ | default\n    direct_io: true | false\n    xnvme_be:  io_uring_file | libaio_file\
+    \ | thrpool_file | ...\n\nUses llama-completion rather than llama-cli because\
+    \ upstream\nrefactored llama-cli into a chat-only REPL; llama-completion is the\n\
+    tty-free one-shot binary.\n"
+  id: 008_run_mmap
+  name: run_mmap
+  nr: 8
+  status:
+    elapsed: 19.572150945663452
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517775.847398
+  uses: run_baseline
+  with:
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    iterations: 1
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    loader: mmap
+    n_gpu_layers: 999
+    n_tokens: 1
+    prompt: hi
+- description: "\nCold-start measurement for llama.cpp with a configurable loader\
+    \ path.\n\nDrops the OS page cache before each iteration, runs llama-completion\n\
+    with ``-n 1`` so it stops as soon as one token is produced, and\nrecords the wall-clock\
+    \ and max RSS via /usr/bin/time. The interval\nis dominated by the weight-load\
+    \ phase, so it is the \"seconds to\nfirst token\" figure of merit.\n\nThe same\
+    \ script drives every loader variant so their cijoe outputs\nland side by side\
+    \ under the same step template. Pass:\n\n    loader:    mmap | stream | xnvme\
+    \ | default\n    direct_io: true | false\n    xnvme_be:  io_uring_file | libaio_file\
+    \ | thrpool_file | ...\n\nUses llama-completion rather than llama-cli because\
+    \ upstream\nrefactored llama-cli into a chat-only REPL; llama-completion is the\n\
+    tty-free one-shot binary.\n"
+  id: 009_run_stream
+  name: run_stream
+  nr: 9
+  status:
+    elapsed: 14.406742811203003
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517795.4195597
+  uses: run_baseline
+  with:
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    iterations: 1
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    loader: stream
+    n_gpu_layers: 999
+    n_tokens: 1
+    prompt: hi
+- description: "\nCold-start measurement for llama.cpp with a configurable loader\
+    \ path.\n\nDrops the OS page cache before each iteration, runs llama-completion\n\
+    with ``-n 1`` so it stops as soon as one token is produced, and\nrecords the wall-clock\
+    \ and max RSS via /usr/bin/time. The interval\nis dominated by the weight-load\
+    \ phase, so it is the \"seconds to\nfirst token\" figure of merit.\n\nThe same\
+    \ script drives every loader variant so their cijoe outputs\nland side by side\
+    \ under the same step template. Pass:\n\n    loader:    mmap | stream | xnvme\
+    \ | default\n    direct_io: true | false\n    xnvme_be:  io_uring_file | libaio_file\
+    \ | thrpool_file | ...\n\nUses llama-completion rather than llama-cli because\
+    \ upstream\nrefactored llama-cli into a chat-only REPL; llama-completion is the\n\
+    tty-free one-shot binary.\n"
+  id: 010_run_xnvme_file
+  name: run_xnvme_file
+  nr: 10
+  status:
+    elapsed: 12.81946063041687
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517809.8263166
+  uses: run_baseline
+  with:
+    direct_io: 'true'
+    gguf_path: /mnt/gguf-shards/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    iterations: 1
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    loader: xnvme
+    n_gpu_layers: 999
+    n_tokens: 1
+    prompt: hi
+    xnvme_be: io_uring_file
+    xnvme_cpu: '0'
+- description: '
+
+    Transition a drive from kernel-attached (XFS-mounted) to
+
+    uio_pci_generic-bound for upcie-cuda P2P.
+
+
+    Pair with setup_dma_target --layout xfs-fiemap --defer_detach true.
+
+    That step stages a drive with XFS + one file and captures FIEMAP,
+
+    but leaves the drive mounted so baseline loaders can read the same
+
+    file via the kernel path. When the baselines are done, this script
+
+    finishes the transition: umount, then DRIVER_OVERRIDE=uio_pci_generic
+
+    xnvme-driver.
+
+
+    Idempotent: skips gracefully if the drive is already bound to
+
+    uio_pci_generic.
+
+    '
+  id: 011_detach_c1
+  name: detach_c1
+  nr: 11
+  status:
+    elapsed: 3.1166789531707764
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517822.6458225
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: 0000:c1:00.0
+    fs_mount_point: /mnt/dma-0
+- description: '
+
+    Transition a drive from kernel-attached (XFS-mounted) to
+
+    uio_pci_generic-bound for upcie-cuda P2P.
+
+
+    Pair with setup_dma_target --layout xfs-fiemap --defer_detach true.
+
+    That step stages a drive with XFS + one file and captures FIEMAP,
+
+    but leaves the drive mounted so baseline loaders can read the same
+
+    file via the kernel path. When the baselines are done, this script
+
+    finishes the transition: umount, then DRIVER_OVERRIDE=uio_pci_generic
+
+    xnvme-driver.
+
+
+    Idempotent: skips gracefully if the drive is already bound to
+
+    uio_pci_generic.
+
+    '
+  id: 012_detach_c2
+  name: detach_c2
+  nr: 12
+  status:
+    elapsed: 3.321817636489868
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517825.7625146
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: 0000:c2:00.0
+    fs_mount_point: /mnt/dma-1
+- description: '
+
+    Transition a drive from kernel-attached (XFS-mounted) to
+
+    uio_pci_generic-bound for upcie-cuda P2P.
+
+
+    Pair with setup_dma_target --layout xfs-fiemap --defer_detach true.
+
+    That step stages a drive with XFS + one file and captures FIEMAP,
+
+    but leaves the drive mounted so baseline loaders can read the same
+
+    file via the kernel path. When the baselines are done, this script
+
+    finishes the transition: umount, then DRIVER_OVERRIDE=uio_pci_generic
+
+    xnvme-driver.
+
+
+    Idempotent: skips gracefully if the drive is already bound to
+
+    uio_pci_generic.
+
+    '
+  id: 013_detach_c3
+  name: detach_c3
+  nr: 13
+  status:
+    elapsed: 2.496654748916626
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517829.0843432
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: 0000:c3:00.0
+    fs_mount_point: /mnt/dma-2
+- description: '
+
+    Transition a drive from kernel-attached (XFS-mounted) to
+
+    uio_pci_generic-bound for upcie-cuda P2P.
+
+
+    Pair with setup_dma_target --layout xfs-fiemap --defer_detach true.
+
+    That step stages a drive with XFS + one file and captures FIEMAP,
+
+    but leaves the drive mounted so baseline loaders can read the same
+
+    file via the kernel path. When the baselines are done, this script
+
+    finishes the transition: umount, then DRIVER_OVERRIDE=uio_pci_generic
+
+    xnvme-driver.
+
+
+    Idempotent: skips gracefully if the drive is already bound to
+
+    uio_pci_generic.
+
+    '
+  id: 014_detach_c4
+  name: detach_c4
+  nr: 14
+  status:
+    elapsed: 3.0074102878570557
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517831.5810149
+  uses: detach_dma_target
+  with:
+    dma_pci_addr: 0000:c4:00.0
+    fs_mount_point: /mnt/dma-3
+- description: 'Prime the upcie-cuda backend against a fleet of DMA drives.
+
+
+    Empirically, the very first upcie-cuda 4-drive registry_init inside
+
+    llama-completion sometimes has one dev return xnvme_dev_get_geo with
+
+    lba_nbytes=0 (loader logs ''opened dev has lba_nbytes=0''). Running
+
+    xnvmeperf cuda-run against the same URIs first primes something
+
+    (CUDA context init, host_heap alloc, device_heap alloc, dma-buf
+
+    export path) that avoids the intermittent open failure. Root cause
+
+    still TBD.
+
+
+    Runtime is tiny (default 2 s per drive-set) and the drives must
+
+    already be bound to uio_pci_generic.
+
+    '
+  id: 015_upcie_prime
+  name: upcie_prime
+  nr: 15
+  status:
+    elapsed: 13.23395848274231
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517834.58845
+  uses: upcie_prime
+  with:
+    pci_addrs: 0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0
+    runtime: 2
+- description: "\nCold-start measurement for llama.cpp with a configurable loader\
+    \ path.\n\nDrops the OS page cache before each iteration, runs llama-completion\n\
+    with ``-n 1`` so it stops as soon as one token is produced, and\nrecords the wall-clock\
+    \ and max RSS via /usr/bin/time. The interval\nis dominated by the weight-load\
+    \ phase, so it is the \"seconds to\nfirst token\" figure of merit.\n\nThe same\
+    \ script drives every loader variant so their cijoe outputs\nland side by side\
+    \ under the same step template. Pass:\n\n    loader:    mmap | stream | xnvme\
+    \ | default\n    direct_io: true | false\n    xnvme_be:  io_uring_file | libaio_file\
+    \ | thrpool_file | ...\n\nUses llama-completion rather than llama-cli because\
+    \ upstream\nrefactored llama-cli into a chat-only REPL; llama-completion is the\n\
+    tty-free one-shot binary.\n"
+  id: 016_run_upcie_cuda
+  name: run_upcie_cuda
+  nr: 16
+  status:
+    elapsed: 6.759624481201172
+    failed: 0
+    passed: 1
+    skipped: 0
+    started: 1783517847.8224297
+  uses: run_baseline
+  with:
+    gguf_path: /mnt/gguf-src/Llama-3.3-70B-Q4_K_M-00001-of-00004.gguf
+    iterations: 1
+    llama_bin: /root/llama.cpp/build/bin/llama-completion
+    loader: xnvme
+    n_gpu_layers: 999
+    n_tokens: 1
+    prompt: hi
+    xnvme_be: upcie-cuda
+    xnvme_cpu: '0'
+    xnvme_dma_extents: /root/dma-c1.extents.json,/root/dma-c2.extents.json,/root/dma-c3.extents.json,/root/dma-c4.extents.json
+    xnvme_dma_uris: 0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0
+tag: null

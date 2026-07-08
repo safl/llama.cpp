@@ -1,0 +1,14 @@
+begin: 1783517753.5907156
+cmd: "cat > /root/dma-c2.extents.json <<'EOF'\n{\n  \"layout\": \"xfs-fiemap\",\n\
+  \  \"device\": \"/dev/nvme1n1\",\n  \"pci_addr\": \"0000:c2:00.0\",\n  \"file_size\"\
+  : 10887146816,\n  \"lba_nbytes\": 512,\n  \"extents\": [\n    {\n      \"file_offset\"\
+  : 0,\n      \"lba\": 192,\n      \"length\": 8568963072\n    },\n    {\n      \"\
+  file_offset\": 8568963072,\n      \"lba\": 16736448,\n      \"length\": 2318184448\n\
+  \    }\n  ]\n}\nEOF"
+cwd: None
+elapsed: 0.224015474319458
+end: 1783517753.8147311
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/004_prepare_dma_c2
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp2_sharded/004_prepare_dma_c2/cmd_13.output

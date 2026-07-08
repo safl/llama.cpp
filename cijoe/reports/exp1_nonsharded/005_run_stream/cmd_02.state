@@ -1,0 +1,10 @@
+begin: 1783517644.3539443
+cmd: 'ulimit -n 262144; /usr/bin/time -f ''wallclock: %e s | rss %M KiB'' /root/llama.cpp/build/bin/llama-completion
+  -m /mnt/dma-0/model.gguf -ngl 999 -p hi -n 1 -no-cnv --loader stream < /dev/null'
+cwd: None
+elapsed: 15.669790267944336
+end: 1783517660.0237346
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/005_run_stream
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/005_run_stream/cmd_02.output

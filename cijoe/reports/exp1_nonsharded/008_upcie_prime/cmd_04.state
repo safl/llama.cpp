@@ -1,0 +1,10 @@
+begin: 1783517686.5377865
+cmd: xnvmeperf cuda-run 0000:c1:00.0 --iopattern read --qdepth 32 --iosize 131072
+  --runtime 2
+cwd: None
+elapsed: 2.7796506881713867
+end: 1783517689.3174372
+err: 0
+is_done: true
+output_dpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/008_upcie_prime
+output_fpath: /tmp/claude-1000/-home-odus-git-xnvme/dead625a-3a71-43d9-9f8a-a96cd14d3bb6/scratchpad/loader-exp-08082026/exp1_nonsharded/008_upcie_prime/cmd_04.output
