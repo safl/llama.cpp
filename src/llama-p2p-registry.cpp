@@ -79,14 +79,14 @@ static void alloc_hook_impl(void * /*user_data*/, int device, void * base, size_
         return;
     }
 
-    // Historically xnvme_mem_map required vaddr and nbytes aligned to
-    // device_pagesize, and ggml-cuda's alloc_buffer only aligns to 128 bytes.
-    // xNVMe now recovers the containing allocation itself, so the caller's
-    // alignment no longer matters; the round-up is kept because it is free
-    // (cudaMalloc rounds its own allocation up to a page anyway) and it keeps
-    // this working against older xNVMe.
-    const size_t pagesize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-    const size_t aligned_size = (size + pagesize - 1) & ~(pagesize - 1);
+    // Register the buffer exactly as ggml allocated it. Rounding the size up
+    // to a page, which older xNVMe needed because it required page-aligned
+    // vaddr and nbytes, now asks to register past the end of the allocation:
+    // CUDA reports an allocation's size as exactly what was requested, ggml
+    // aligns buffer sizes to 128 bytes, and xNVMe refuses a range that leaves
+    // the allocation it recovered. Current xNVMe recovers the containing
+    // allocation itself, so any size is fine.
+    const size_t aligned_size = size;
 
     pending_registration pr;
     pr.size = aligned_size;
