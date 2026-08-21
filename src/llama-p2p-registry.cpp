@@ -79,10 +79,12 @@ static void alloc_hook_impl(void * /*user_data*/, int device, void * base, size_
         return;
     }
 
-    // xnvme_mem_map requires vaddr and nbytes aligned to device_pagesize
-    // (typically 4 KiB). ggml-cuda's alloc_buffer only aligns to 128 bytes,
-    // so we round the size up here. cudaMalloc rounds its own allocation up
-    // to a page anyway, so the extra bytes are still valid VRAM.
+    // Historically xnvme_mem_map required vaddr and nbytes aligned to
+    // device_pagesize, and ggml-cuda's alloc_buffer only aligns to 128 bytes.
+    // xNVMe now recovers the containing allocation itself, so the caller's
+    // alignment no longer matters; the round-up is kept because it is free
+    // (cudaMalloc rounds its own allocation up to a page anyway) and it keeps
+    // this working against older xNVMe.
     const size_t pagesize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     const size_t aligned_size = (size + pagesize - 1) & ~(pagesize - 1);
 
@@ -94,12 +96,21 @@ static void alloc_hook_impl(void * /*user_data*/, int device, void * base, size_
     // completion even if the registry is later torn down; shutdown blocks
     // for their completion before unmapping.
     std::vector<xnvme_dev *> devs_snapshot = r.devs;
-    // Fire ONE background thread that iterates all devs sequentially. The
-    // heavy cost of xnvme_mem_map is cuMemGetHandleForAddressRange +
-    // dmabuf_attach per 2 MiB chunk on the first dev; subsequent devs
-    // amortise to ~zero via the mapping registry's refcount, so running
-    // them in a single thread is not slower than parallel and avoids
-    // per-thread contention on the CUDA driver's dma-buf export path.
+    // Fire ONE background thread that iterates all devs sequentially.
+    //
+    // The heavy cost of xnvme_mem_map used to be cuMemGetHandleForAddressRange
+    // + dmabuf_attach per 2 MiB chunk. xNVMe now exports once per allocation
+    // instead, because ROCm returns the whole buffer object regardless of the
+    // range asked for and a per-chunk export therefore resolves sub-ranges
+    // wrongly, so a buffer of any size costs one export rather than one per
+    // 2 MiB. Subsequent devs still amortise to ~zero: the registry is process
+    // global, so registering the same base for another dev only bumps a
+    // refcount. That also means the per-dev loop is now redundant rather than
+    // cheap, and could be dropped once older xNVMe no longer needs supporting.
+    //
+    // These calls land in the same process-global registry, so several of
+    // these threads registering at once race unless xNVMe serialises it. It
+    // does, from the release that introduced the per-allocation export.
     pr.per_dev.emplace_back(std::async(std::launch::async,
         [devs_snapshot, base, aligned_size, device]() -> int {
             cudaError_t cerr = cudaSetDevice(device);
