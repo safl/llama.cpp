@@ -185,10 +185,12 @@ int llama_p2p_registry_init(const std::string & uris_csv) {
     }
 
     xnvme_opts opts{};
+    // Name the backend only. async/sync/admin are implementation ids, a
+    // different namespace: the upcie-cuda config shares the plain upcie
+    // command path, whose id is "upcie". Pinning them to the backend name
+    // used to match by coincidence, when each flavour carried its own, and
+    // now filters every config out so dev_open returns -ENXIO.
     opts.be     = "upcie-cuda";
-    opts.async  = "upcie-cuda";
-    opts.sync   = "upcie-cuda";
-    opts.admin  = "upcie-cuda";
     opts.nsid   = 1;
     opts.rdonly = 1;
 

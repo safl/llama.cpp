@@ -866,10 +866,9 @@ static bool llama_loader_xnvme_run_upcie_cuda(
     }
 
     xnvme_opts opts{};
+    // Backend name only; see the note in llama-p2p-registry.cpp on why
+    // async/sync/admin must not be pinned to it.
     opts.be     = xnvme_be.c_str();
-    opts.async  = xnvme_be.c_str();
-    opts.sync   = xnvme_be.c_str();
-    opts.admin  = xnvme_be.c_str();
     opts.nsid   = 1;
     opts.rdonly = 1;
 
